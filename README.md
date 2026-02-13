@@ -331,7 +331,6 @@ MIT License - see [LICENSE](LICENSE)
 ## 🙏 Credits
 
 - [alexzhang13/rlm](https://github.com/alexzhang13/rlm) - Recursive Language Models
-- [PyTorch](https://github.com/pytorch/pytorch) - Target repository
 - OpenAI for embeddings and GPT models
 
 ## 📞 Support
