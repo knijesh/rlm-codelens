@@ -408,9 +408,10 @@ class RepositoryAnalyzer:
             >>> print(f"Estimated cost: ${estimate['total']:.2f}")
             >>> print(f"Per item: ${estimate['per_item']:.4f}")
         """
-        # Estimate embedding cost
+        # Estimate embedding cost (assume average 500 tokens per item)
+        avg_tokens_per_item = 500
         embed_cost = self.cost_estimator.estimate_embeddings_cost(
-            [""] * num_items  # Placeholder texts
+            ["x" * avg_tokens_per_item] * num_items
         )
 
         # Estimate RLM analysis cost

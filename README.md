@@ -1,16 +1,16 @@
 # RLM-Codelens
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![OpenAI](https://img.shields.io/badge/OpenAI-API-orange)](https://openai.com)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-blue)](https://postgresql.org)
+[![CI](https://github.com/knijesh/rlm-codelens/workflows/CI/badge.svg)](https://github.com/knijesh/rlm-codelens/actions)
 [![Code style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![codecov](https://codecov.io/gh/knijesh/rlm-codelens/branch/main/graph/badge.svg)](https://codecov.io/gh/knijesh/rlm-codelens)
 
 > **A lens into your codebase - RLM-powered repository analysis using Recursive Language Models with enterprise-grade cost control and security.**
 
 ## 🚀 Overview
 
-**RLM-Codelens** analyzes GitHub repositories (e.g., 80,000+ PyTorch issues/PRs) to discover topics, correlations, and insights using **Recursive Language Models (RLM)** with:
+**RLM-Codelens** analyzes GitHub repositories to discover topics, correlations, and insights using **Recursive Language Models (RLM)** with:
 
 - 🔒 **Security-hardened** - Input sanitization, prompt injection protection
 - 💰 **Cost-controlled** - Pre-flight estimation, 80-92% cost savings ($16 vs $200+)
@@ -19,21 +19,39 @@
 
 ## 📦 Quick Start
 
+### Installation
+
 ```bash
-# Clone & setup
-git clone https://github.com/yourusername/rlm-codelens.git
+# Clone the repository
+git clone https://github.com/knijesh/rlm-codelens.git
 cd rlm-codelens
-pip install -r requirements.txt
+
+# Install using uv (recommended)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync --extra dev
+uv pip install -e .
+
+# Or using pip
+pip install -e ".[dev]"
+
+# Copy environment template
 cp .env.example .env
 # Edit .env with your API keys
+```
 
+### Usage
+
+```bash
 # 1. Estimate costs (no API calls)
-python main.py --estimate-only
+rlmc estimate --items 1000
 
-# 2. Run analysis with budget control
-python main.py --budget 20.0 --sample
+# 2. Run analysis with sample data (fast, cheap)
+rlmc analyze encode/starlette --sample --limit 20
 
-# 3. View results
+# 3. Run full analysis with budget control
+rlmc analyze pytorch/pytorch --budget 20.0
+
+# 4. View results
 open visualization/issue_graph_visualization.html
 ```
 
@@ -46,12 +64,23 @@ open visualization/issue_graph_visualization.html
 
 ## 🔑 Configuration
 
+Create a `.env` file in the project root:
+
 ```env
+# Required: API Keys
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 OPENAI_API_KEY=sk-xxxxxxxxxxxx
+
+# Optional: Default repository (used when not specified in command)
+REPO_OWNER=encode
+REPO_NAME=starlette
+
+# Optional: Database and budget settings
 DATABASE_URL=postgresql://localhost/pytorch_analysis
 BUDGET_LIMIT=50.0
 ```
+
+**Note:** When `REPO_OWNER` and `REPO_NAME` are set in `.env`, you can run `rlmc analyze` without specifying a repository. You can override the default by providing a repository argument: `rlmc analyze owner/repo`.
 
 ## 📊 Features
 
@@ -82,8 +111,8 @@ Data Collection → Embeddings → Clustering → RLM Analysis → Visualization
 ```
 
 **Tech Stack:**
-- Python 3.10+
-- PostgreSQL 14+
+- Python 3.11+
+- PostgreSQL 14+ (or SQLite for development)
 - OpenAI API
 - D3.js v7
 - HDBSCAN
@@ -95,65 +124,81 @@ Data Collection → Embeddings → Clustering → RLM Analysis → Visualization
 rlm-codelens/
 ├── src/rlm_codelens/           # Main source code
 │   ├── __init__.py
-│   ├── core/                   # Core analysis logic
-│   │   ├── analyzer.py         # RepositoryAnalyzer class
-│   │   └── config.py           # Configuration management
+│   ├── cli.py                  # CLI entry point
+│   ├── commands.py             # Command implementations
+│   ├── config.py               # Configuration management
+│   ├── data_collection.py      # GitHub data collection
+│   ├── embeddings.py           # OpenAI embeddings
+│   ├── clustering.py           # HDBSCAN clustering
+│   ├── rlm_analysis.py         # RLM analysis
+│   ├── issue_correlation.py    # Correlation discovery
+│   ├── report_generation.py    # Report generation
 │   └── utils/                  # Utility modules
-│       ├── secure_rlm_client.py
+│       ├── cost_tracker.py
 │       ├── cost_estimator.py
-│       └── database.py
-├── tests/                      # Comprehensive test suite
+│       ├── database.py
+│       └── secure_rlm_client.py
+├── tests/                      # Test suite
 │   ├── unit/                   # Unit tests
-│   ├── integration/            # Integration tests
-│   └── conftest.py             # Test fixtures
-├── config/                     # Configuration files
+│   └── integration/            # Integration tests
 ├── docs/                       # Documentation
 ├── visualization/              # D3.js visualization
 ├── outputs/                    # Generated results
-├── main.py                     # Entry point
+├── pyproject.toml              # Project configuration
 └── README.md
 ```
 
-## 📝 Usage
+## 📝 Usage Examples
 
-### Basic Analysis
+### Cost Estimation
+```bash
+# Estimate cost before running
+rlmc estimate --items 50000
+```
+
+### Repository Analysis
+
+The `analyze` command can use a repository from .env (REPO_OWNER and REPO_NAME) or accept one as an argument:
+
+```bash
+# Set default repository in .env:
+# REPO_OWNER=encode
+# REPO_NAME=starlette
+
+# Then analyze using .env defaults:
+rlmc analyze --sample --limit 100
+
+# Or specify a repository (overrides .env):
+rlmc analyze encode/starlette --sample --limit 100
+
+# Full analysis with custom budget
+rlmc analyze pytorch/pytorch --budget 25.0 --phase all
+
+# Run specific phase only
+rlmc analyze owner/repo --phase collect --sample
+```
+
+### Method Comparison
+```bash
+# Compare RLM vs Non-RLM approaches
+rlmc compare --items 1000
+```
+
+### Python API
 ```python
-from rlm_codelens import RepositoryAnalyzer, AnalysisConfig
+from rlm_codelens import RepositoryAnalyzer
+from rlm_codelens.core.config import Config
 
-config = AnalysisConfig(parallel_workers=4, enable_caching=True)
-analyzer = RepositoryAnalyzer(budget_limit=20.0, config=config)
+# Configure
+config = Config()
+config.validate()
 
-# Analyze a repository
+# Analyze
+analyzer = RepositoryAnalyzer(budget_limit=50.0)
 result = analyzer.analyze_repository("pytorch/pytorch")
 
 print(f"Found {len(result.clusters)} topics")
 print(f"Cost: ${result.cost_summary['total_spent']:.2f}")
-
-# Save results
-result.save("./analysis_results")
-```
-
-### Cost Estimation
-```python
-from rlm_codelens import RepositoryAnalyzer
-
-analyzer = RepositoryAnalyzer(budget_limit=50.0)
-
-# Estimate cost before running
-estimate = analyzer.estimate_cost(num_items=80000)
-print(f"Estimated cost: ${estimate['total']:.2f}")
-print(f"Per item: ${estimate['per_item']:.4f}")
-```
-
-### Configuration
-```python
-from rlm_codelens.core.config import Config
-
-config = Config()
-config.validate()  # Ensure all required vars are set
-
-print(f"Budget: ${config.budget_limit}")
-print(f"Model: {config.rlm_model}")
 ```
 
 ## 📁 Output
@@ -161,7 +206,7 @@ print(f"Model: {config.rlm_model}")
 ```
 outputs/
 ├── issue_graph.json              # D3.js graph data
-├── pytorch_analysis_report.md    # Full report
+├── {repo}_analysis_report.md     # Full report
 ├── correlation_analysis.json     # Statistics
 └── *.png                         # Visualizations
 ```
@@ -204,28 +249,59 @@ Comprehensive test suite with unit and integration tests:
 
 ```bash
 # Install dev dependencies
-pip install -r requirements-dev.txt
+uv sync --extra dev
 
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run with coverage report
-pytest tests/ --cov=rlm_codelens --cov-report=html
+uv run pytest tests/ --cov=rlm_codelens --cov-report=html
 
 # Run only unit tests
-pytest tests/unit/ -v
+uv run pytest tests/unit/ -v
 
 # Run only integration tests
-pytest tests/integration/ -v
-
-# Run specific test file
-pytest tests/unit/test_core.py -v
+uv run pytest tests/integration/ -v
 ```
 
 ### Test Structure
 - **Unit tests**: Test individual components in isolation
 - **Integration tests**: Test component interactions
 - **Fixtures**: Shared test data and mocks in `conftest.py`
+
+## 🛠️ Development Setup
+
+### Prerequisites
+- Python 3.11 or higher
+- Git
+
+### Setup
+```bash
+# Clone repository
+git clone https://github.com/knijesh/rlm-codelens.git
+cd rlm-codelens
+
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync --extra dev
+
+# Install package in editable mode
+uv pip install -e .
+
+# Run tests
+uv run pytest tests/ -v
+
+# Run linter
+uv run ruff check src/ tests/
+
+# Format code
+uv run black src/ tests/
+
+# Type check
+uv run mypy src/rlm_codelens/
+```
 
 ## 📈 Performance
 
@@ -238,11 +314,15 @@ pytest tests/unit/test_core.py -v
 
 ## 🤝 Contributing
 
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
 1. Fork the repository
 2. Create feature branch: `git checkout -b feature/name`
 3. Commit changes: `git commit -m 'Add feature'`
 4. Push to branch: `git push origin feature/name`
 5. Open Pull Request
+
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
 
 ## 📄 License
 
@@ -254,6 +334,13 @@ MIT License - see [LICENSE](LICENSE)
 - [PyTorch](https://github.com/pytorch/pytorch) - Target repository
 - OpenAI for embeddings and GPT models
 
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/knijesh/rlm-codelens/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/knijesh/rlm-codelens/discussions)
+
 ---
 
 **Made with 🔒 security, 💰 cost control, and ⚡ performance in mind**
+
+**Author:** Nijesh Kanjinghat ([@knijesh](https://github.com/knijesh))

@@ -36,6 +36,40 @@ class CostEstimate:
     def __str__(self):
         return f"{self.input_tokens} input + {self.output_tokens} output tokens = ${self.estimated_cost:.4f}"
 
+    def __float__(self):
+        """Allow conversion to float for cost comparisons."""
+        return float(self.estimated_cost)
+
+    def __gt__(self, other):
+        """Greater than comparison."""
+        if isinstance(other, CostEstimate):
+            return self.estimated_cost > other.estimated_cost
+        return self.estimated_cost > other
+
+    def __lt__(self, other):
+        """Less than comparison."""
+        if isinstance(other, CostEstimate):
+            return self.estimated_cost < other.estimated_cost
+        return self.estimated_cost < other
+
+    def __ge__(self, other):
+        """Greater than or equal comparison."""
+        if isinstance(other, CostEstimate):
+            return self.estimated_cost >= other.estimated_cost
+        return self.estimated_cost >= other
+
+    def __le__(self, other):
+        """Less than or equal comparison."""
+        if isinstance(other, CostEstimate):
+            return self.estimated_cost <= other.estimated_cost
+        return self.estimated_cost <= other
+
+    def __eq__(self, other):
+        """Equal comparison."""
+        if isinstance(other, CostEstimate):
+            return self.estimated_cost == other.estimated_cost
+        return self.estimated_cost == other
+
 
 @dataclass
 class RLMResult:

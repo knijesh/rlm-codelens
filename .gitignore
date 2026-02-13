@@ -124,6 +124,8 @@ checkpoints/
 *.db
 *.sqlite
 *.sqlite3
+data/
+!data/.gitkeep
 
 # Secrets
 .env
@@ -149,3 +151,8 @@ service-account.json
 tmp/
 temp/
 *.tmp
+
+# Internal documentation (not for repo)
+IMPLEMENTATION_SUMMARY.md
+REFACTORING_SUMMARY.md
+REQUIREMENTS.md

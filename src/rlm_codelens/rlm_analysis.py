@@ -4,6 +4,7 @@ Production-ready with cost controls, security, and performance optimizations
 """
 
 import json
+import re
 import pandas as pd
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,14 +12,21 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from utils.database import get_db_manager
-from utils.secure_rlm_client import (
+from rlm_codelens.utils.database import get_db_manager
+from rlm_codelens.utils.secure_rlm_client import (
     SecureRLMClient,
     CostEstimator,
     PromptSanitizer,
     BudgetExceededError,
 )
-from config import RLM_ROOT_MODEL, BUDGET_LIMIT
+from rlm_codelens.config import (
+    RLM_ROOT_MODEL,
+    BUDGET_LIMIT,
+    TABLE_CLUSTERED,
+    TABLE_CLUSTER_STATS,
+    TABLE_CLUSTER_ANALYSES,
+    TABLE_CORRELATIONS,
+)
 
 
 @dataclass
@@ -74,7 +82,7 @@ Respond with JSON:{{"topic":"name","description":"brief","category":"Bug|Feature
             "trend": "increasing" if len(monthly_data) > 12 else "stable",
         }
 
-        return f"""Analyze trends in PyTorch repo.
+        return f"""Analyze trends in this repository.
 Data: {json.dumps(summary, separators=(",", ":"))}
 Identify: emerging topics, declining topics, patterns (2 paragraphs)."""
 
@@ -140,6 +148,10 @@ class ComparativeAnalyzer:
 
         time_diff = non_rlm["time"] - rlm["time"]
 
+        # Handle None values in success_rate
+        rlm_success_rate = (rlm.get("success_rate") or 0) * 100
+        non_rlm_success_rate = (non_rlm.get("success_rate") or 0) * 100
+
         return {
             "rlm_metrics": {
                 "total_calls": rlm["calls"],
@@ -149,7 +161,7 @@ class ComparativeAnalyzer:
                 if rlm["calls"] > 0
                 else 0,
                 "total_time_sec": rlm["time"],
-                "success_rate": rlm["success_rate"] * 100,
+                "success_rate": rlm_success_rate,
             },
             "non_rlm_metrics": {
                 "total_calls": non_rlm["calls"],
@@ -159,7 +171,7 @@ class ComparativeAnalyzer:
                 if non_rlm["calls"] > 0
                 else 0,
                 "total_time_sec": non_rlm["time"],
-                "success_rate": non_rlm["success_rate"] * 100,
+                "success_rate": non_rlm_success_rate,
             },
             "comparison": {
                 "cost_savings": cost_savings,
@@ -279,9 +291,12 @@ class SecureRLMAnalyzer:
         """Analyze clusters in parallel with cost control"""
         print("\n🚀 Starting parallel cluster analysis...")
 
-        # Load data
-        clusters_df = self.db.load_dataframe("cluster_stats")
-        items_df = self.db.load_dataframe("clustered_items")
+        # Load data (cluster_stats table is always created by clustering, possibly empty)
+        if not self.db.table_exists(TABLE_CLUSTER_STATS):
+            print("  ⚠️  No cluster stats table found; run clustering phase first.")
+            return pd.DataFrame()
+        clusters_df = self.db.load_dataframe(TABLE_CLUSTER_STATS)
+        items_df = self.db.load_dataframe(TABLE_CLUSTERED)
 
         # Filter to real clusters (skip noise)
         clusters_to_analyze = clusters_df[clusters_df["cluster_id"] != -1].head(
@@ -315,7 +330,7 @@ class SecureRLMAnalyzer:
                     self._analyze_single_cluster,
                     cluster_id,
                     items_df,
-                    cluster_row.get("total_size", 0),
+                    cluster_row.get("size", cluster_row.get("total_size", 0)),
                 )
                 future_to_cluster[future] = cluster_id
 
@@ -337,9 +352,16 @@ class SecureRLMAnalyzer:
                     print(f"   ⚠️  Cluster {cluster_id} failed: {e}")
                     results.append({"cluster_id": cluster_id, "error": str(e)})
 
-        # Save results
+        # Save results (use schema with columns when empty so SQLite table is valid)
         results_df = pd.DataFrame(results)
-        self.db.save_dataframe(results_df, "cluster_analyses", if_exists="replace")
+        if results_df.empty:
+            results_df = pd.DataFrame(
+                columns=[
+                    "cluster_id", "topic", "description", "category",
+                    "cost", "sample_size", "total_size", "cache_hit",
+                ]
+            )
+        self.db.save_dataframe(results_df, TABLE_CLUSTER_ANALYSES, if_exists="replace")
 
         print(f"\n✅ Analyzed {len(results)} clusters")
         self.rlm_client.print_budget_summary()
@@ -390,49 +412,121 @@ class SecureRLMAnalyzer:
 
         # Parse result
         if result.success:
+            response_text = result.response.strip()
+            analysis = None
+
+            # Try to extract JSON from response (handles nested braces)
             try:
-                # Extract JSON
-                json_match = re.search(r"\{[^}]+\}", result.response)
-                if json_match:
-                    analysis = json.loads(json_match.group())
-                else:
-                    analysis = json.loads(result.response)
+                brace_depth = 0
+                start_idx = None
+                for i, ch in enumerate(response_text):
+                    if ch == "{":
+                        if brace_depth == 0:
+                            start_idx = i
+                        brace_depth += 1
+                    elif ch == "}":
+                        brace_depth -= 1
+                        if brace_depth == 0 and start_idx is not None:
+                            try:
+                                analysis = json.loads(response_text[start_idx : i + 1])
+                                if isinstance(analysis, dict):
+                                    break
+                                analysis = None
+                            except json.JSONDecodeError:
+                                start_idx = None
+                                continue
 
-                analysis["cluster_id"] = cluster_id
-                analysis["sample_size"] = len(sample_data)
-                analysis["total_size"] = total_size
-                analysis["cost"] = result.cost
-                analysis["cache_hit"] = result.cache_hit
+                if analysis is None:
+                    analysis = json.loads(response_text)
+            except (json.JSONDecodeError, TypeError):
+                analysis = None
 
-                return analysis
-
-            except (json.JSONDecodeError, KeyError) as e:
-                return {
-                    "cluster_id": cluster_id,
-                    "error": f"Parse error: {e}",
-                    "raw_response": result.response[:200],
-                    "cost": result.cost,
+            # If no JSON found, create analysis from text response + sample data
+            if not isinstance(analysis, dict):
+                # Derive topic from sample titles
+                titles = [item.get("title", "")[:40] for item in sample_data[:3]]
+                topic_hint = titles[0] if titles else f"Cluster {cluster_id}"
+                analysis = {
+                    "topic": topic_hint,
+                    "description": response_text[:300]
+                    if response_text
+                    else "No description",
+                    "category": self._infer_category(sample_data),
                 }
+
+            # Serialize any list/dict values for SQLite compatibility
+            for key, val in analysis.items():
+                if isinstance(val, (list, dict)):
+                    analysis[key] = json.dumps(val)
+
+            analysis["cluster_id"] = cluster_id
+            analysis["sample_size"] = len(sample_data)
+            analysis["total_size"] = total_size
+            analysis["cost"] = result.cost
+            analysis["cache_hit"] = result.cache_hit
+
+            return analysis
         else:
             return {
                 "cluster_id": cluster_id,
-                "error": result.error or "Unknown error",
+                "topic": f"Cluster {cluster_id}",
+                "category": "Other",
+                "description": result.error or "Analysis failed",
                 "cost": result.cost,
             }
+
+    @staticmethod
+    def _infer_category(sample_data: List[Dict]) -> str:
+        """Infer category from sample data labels and types"""
+        all_labels = []
+        for item in sample_data:
+            labels = item.get("labels", "")
+            if isinstance(labels, str):
+                all_labels.extend(
+                    [l.strip().lower() for l in labels.split(",") if l.strip()]
+                )
+            elif isinstance(labels, list):
+                all_labels.extend([l.lower() for l in labels])
+
+        label_str = " ".join(all_labels)
+        if any(w in label_str for w in ["bug", "fix", "error", "crash"]):
+            return "Bug"
+        elif any(w in label_str for w in ["feature", "enhancement", "request"]):
+            return "Feature"
+        elif any(w in label_str for w in ["doc", "documentation"]):
+            return "Documentation"
+        elif any(w in label_str for w in ["perf", "performance", "speed", "memory"]):
+            return "Performance"
+        elif any(w in label_str for w in ["api", "interface"]):
+            return "API"
+        elif any(w in label_str for w in ["dependencies", "deps"]):
+            return "Dependencies"
+        return "Other"
 
     def discover_correlations_safe(self) -> List[Dict]:
         """Discover correlations with cost control"""
         print("\n🔍 Discovering correlations...")
 
-        query = """
-        SELECT i.*, c.topic, c.category
-        FROM clustered_items i
-        JOIN cluster_analyses c ON i.cluster_id = c.cluster_id
-        WHERE i.cluster_id != -1
-        LIMIT 5000
-        """
+        # Try query with cluster analyses join, fallback to simple query
+        try:
+            query = f"""
+            SELECT i.*, c.topic, c.category
+            FROM {TABLE_CLUSTERED} i
+            LEFT JOIN {TABLE_CLUSTER_ANALYSES} c ON i.cluster_id = c.cluster_id
+            WHERE i.cluster_id != -1
+            LIMIT 5000
+            """
+            df = self.db.load_dataframe(None, query)
+        except Exception:
+            # Fallback if cluster_analyses table doesn't have expected columns
+            query = f"""
+            SELECT *, 'Unknown' as topic, 'Other' as category
+            FROM {TABLE_CLUSTERED}
+            WHERE cluster_id != -1
+            LIMIT 5000
+            """
+            df = self.db.load_dataframe(None, query)
 
-        df = self.db.load_dataframe(None, query)
         print(f"   Analyzing {len(df)} items...")
 
         # Limit to reduce cost
@@ -451,7 +545,7 @@ class SecureRLMAnalyzer:
 
         # Save correlations
         correlations_df = pd.DataFrame(correlations)
-        self.db.save_dataframe(correlations_df, "correlations", if_exists="replace")
+        self.db.save_dataframe(correlations_df, TABLE_CORRELATIONS, if_exists="replace")
 
         print(f"✅ Discovered {len(correlations)} correlation patterns")
 
@@ -459,13 +553,15 @@ class SecureRLMAnalyzer:
 
     def _analyze_temporal_trends_safe(self, df: pd.DataFrame) -> Dict:
         """Analyze temporal trends with cost control"""
+        df = df.copy()
         df["month"] = pd.to_datetime(df["created_at"]).dt.to_period("M")
 
         # Get only recent 12 months (not 24) to save tokens
         recent_months = df["month"].unique()[-12:]
         recent_df = df[df["month"].isin(recent_months)]
 
-        top_topics = recent_df["topic"].value_counts().head(5).index.tolist()
+        topic_col = "topic" if "topic" in df.columns else "cluster_id"
+        top_topics = recent_df[topic_col].value_counts().head(5).index.tolist()
 
         # Build optimized prompt
         prompt = self.prompt_builder.build_temporal_analysis_prompt(
@@ -496,14 +592,18 @@ class SecureRLMAnalyzer:
     def _analyze_author_patterns_safe(self, df: pd.DataFrame) -> Dict:
         """Analyze author patterns with cost control"""
         # Limit to top 20 authors
-        author_stats = df.groupby(["author", "topic"]).size().reset_index(name="count")
+        topic_col = "topic" if "topic" in df.columns else "cluster_id"
+        author_stats = (
+            df.groupby(["author", topic_col]).size().reset_index(name="count")
+        )
         top_authors = author_stats.nlargest(20, "count")
 
         # Compact prompt
+        topic_col = "topic" if "topic" in df.columns else "cluster_id"
         summary = {
             "top_contributors": len(top_authors),
             "unique_authors": df["author"].nunique(),
-            "unique_topics": df["topic"].nunique(),
+            "unique_topics": df[topic_col].nunique(),
         }
 
         prompt = f"""Analyze contributor patterns.

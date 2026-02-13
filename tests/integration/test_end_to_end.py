@@ -123,7 +123,7 @@ class TestSecurityIntegration:
 class TestPerformanceIntegration:
     """Integration tests for performance features."""
 
-    def test_parallel_execution_faster(self, mock_db):
+    def test_parallel_execution_faster(self, mock_db_manager):
         """Test that parallel execution is faster than sequential."""
         import time
 
@@ -140,7 +140,7 @@ class TestPerformanceIntegration:
         assert seq_analyzer.config.parallel_workers == 1
         assert par_analyzer.config.parallel_workers == 4
 
-    def test_memory_efficiency_with_chunks(self, mock_db):
+    def test_memory_efficiency_with_chunks(self, mock_db_manager):
         """Test that large datasets are handled efficiently."""
         analyzer = RepositoryAnalyzer(budget_limit=50.0)
 

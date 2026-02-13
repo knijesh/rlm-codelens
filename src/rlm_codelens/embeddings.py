@@ -7,9 +7,15 @@ import openai
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
-from utils.database import get_db_manager
-from utils.cost_tracker import CostTracker, format_cost
-from config import OPENAI_API_KEY, EMBEDDING_MODEL, EMBEDDING_BATCH_SIZE
+from rlm_codelens.utils.database import get_db_manager
+from rlm_codelens.utils.cost_tracker import CostTracker, format_cost
+from rlm_codelens.config import (
+    OPENAI_API_KEY,
+    EMBEDDING_MODEL,
+    EMBEDDING_BATCH_SIZE,
+    TABLE_ITEMS,
+    TABLE_EMBEDDINGS,
+)
 
 
 class EmbeddingGenerator:
@@ -47,17 +53,18 @@ class EmbeddingGenerator:
 
         return text.strip()
 
-    def generate_embeddings(self, table_name="pytorch_items", batch_size=None):
+    def generate_embeddings(self, table_name=None, batch_size=None):
         """
         Generate embeddings for all items in database
 
         Args:
-            table_name: Name of table with items
+            table_name: Name of table with items (defaults to TABLE_ITEMS from config)
             batch_size: Batch size for API calls
 
         Returns:
             DataFrame with embeddings added
         """
+        table_name = table_name or TABLE_ITEMS
         batch_size = batch_size or EMBEDDING_BATCH_SIZE
 
         print(f"\n🔄 Generating embeddings...")
@@ -211,19 +218,30 @@ class EmbeddingGenerator:
         """Save embeddings to database"""
         print("\n💾 Saving embeddings to database...")
 
-        # Save full dataframe
-        self.db.save_dataframe(df, "pytorch_items_with_embeddings", if_exists="replace")
+        # Convert embedding vectors to JSON strings for SQLite compatibility
+        import json
 
-        # Create indexes
-        self.db.create_indexes(
-            "pytorch_items_with_embeddings", ["number", "type", "cluster_id"]
-        )
+        df_to_save = df.copy()
+        if "embedding" in df_to_save.columns:
+            df_to_save["embedding"] = df_to_save["embedding"].apply(
+                lambda x: json.dumps(x) if isinstance(x, list) else x
+            )
+
+        # Save full dataframe with dynamic table name
+        self.db.save_dataframe(df_to_save, TABLE_EMBEDDINGS, if_exists="replace")
+
+        # Create indexes (only on columns that exist)
+        available_columns = [
+            col for col in ["number", "type", "cluster_id"] if col in df_to_save.columns
+        ]
+        if available_columns:
+            self.db.create_indexes(TABLE_EMBEDDINGS, available_columns)
 
         print("✓ Embeddings saved successfully")
 
     def get_embedding_stats(self):
         """Get statistics about generated embeddings"""
-        df = self.db.load_dataframe("pytorch_items_with_embeddings")
+        df = self.db.load_dataframe(TABLE_EMBEDDINGS, parse_embeddings=True)
 
         stats = {
             "total_items": len(df),
@@ -240,26 +258,5 @@ class EmbeddingGenerator:
         return stats
 
 
-def main():
-    """Run embedding generation"""
-    print("=" * 60)
-    print("EMBEDDING GENERATION")
-    print("=" * 60)
-
-    # Initialize generator
-    generator = EmbeddingGenerator()
-
-    # Generate embeddings
-    df = generator.generate_embeddings()
-
-    # Print stats
-    stats = generator.get_embedding_stats()
-    print("\n📊 Embedding Statistics:")
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
-
-    return df
-
-
-if __name__ == "__main__":
-    main()
+# Note: Use main.py as the single driver file for the entire pipeline
+# This module provides the EmbeddingGenerator class for generating embeddings

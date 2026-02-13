@@ -5,7 +5,7 @@ Handles PostgreSQL connections and common operations
 
 import pandas as pd
 from sqlalchemy import create_engine, text
-from config import DATABASE_URL
+from rlm_codelens.config import DATABASE_URL
 
 
 class DatabaseManager:
@@ -20,56 +20,58 @@ class DatabaseManager:
         df.to_sql(table_name, self.engine, if_exists=if_exists, index=False)
         print(f"✓ Saved {len(df)} rows to table '{table_name}'")
 
-    def load_dataframe(self, table_name, query=None):
+    def load_dataframe(self, table_name, query=None, parse_embeddings=False):
         """Load data from database into pandas DataFrame"""
         if query:
-            return pd.read_sql(query, self.engine)
-        return pd.read_sql(f"SELECT * FROM {table_name}", self.engine)
+            df = pd.read_sql(query, self.engine)
+        else:
+            df = pd.read_sql(f"SELECT * FROM {table_name}", self.engine)
+
+        # Parse JSON embeddings back to lists if requested
+        if parse_embeddings and "embedding" in df.columns:
+            import json
+
+            df["embedding"] = df["embedding"].apply(
+                lambda x: json.loads(x)
+                if isinstance(x, str) and x.startswith("[")
+                else x
+            )
+
+        return df
 
     def table_exists(self, table_name):
-        """Check if table exists"""
-        query = text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = :table
-            );
-        """)
-        with self.engine.connect() as conn:
-            result = conn.execute(query, {"table": table_name})
-            return result.scalar()
+        """Check if table exists (works with both PostgreSQL and SQLite)"""
+        from sqlalchemy import inspect
+
+        inspector = inspect(self.engine)
+        return table_name in inspector.get_table_names()
 
     def get_table_stats(self, table_name):
-        """Get row count and column info for a table"""
+        """Get row count and column info for a table (works with both PostgreSQL and SQLite)"""
         count_query = text(f"SELECT COUNT(*) FROM {table_name}")
         with self.engine.connect() as conn:
             count = conn.execute(count_query).scalar()
 
-        columns_query = text("""
-            SELECT column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_name = :table
-            ORDER BY ordinal_position;
-        """)
-        with self.engine.connect() as conn:
-            columns = pd.read_sql(columns_query, conn, params={"table": table_name})
+        from sqlalchemy import inspect
+
+        inspector = inspect(self.engine)
+        columns = [
+            {"column_name": col["name"], "data_type": str(col["type"])}
+            for col in inspector.get_columns(table_name)
+        ]
 
         return {
             "table": table_name,
             "row_count": count,
-            "columns": columns.to_dict("records"),
+            "columns": columns,
         }
 
     def list_tables(self):
-        """List all tables in the database"""
-        query = text("""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public'
-            ORDER BY table_name;
-        """)
-        with self.engine.connect() as conn:
-            result = pd.read_sql(query, conn)
-            return result["table_name"].tolist()
+        """List all tables in the database (works with both PostgreSQL and SQLite)"""
+        from sqlalchemy import inspect
+
+        inspector = inspect(self.engine)
+        return sorted(inspector.get_table_names())
 
     def execute_query(self, query, params=None):
         """Execute raw SQL query"""

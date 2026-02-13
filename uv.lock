@@ -3438,7 +3438,7 @@ wheels = [
 [[package]]
 name = "rlm-codelens"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "hdbscan" },
     { name = "matplotlib" },

@@ -1,6 +1,7 @@
 """
-Configuration module for PyTorch RLM Analysis
+Configuration module for RLM-Codelens
 Loads settings from environment variables
+Generic and repository-agnostic
 """
 
 import os
@@ -19,8 +20,65 @@ OUTPUTS_DIR.mkdir(exist_ok=True)
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Database
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost/pytorch_analysis")
+# Repository Configuration
+REPO_OWNER = os.getenv("REPO_OWNER", "pytorch")
+REPO_NAME = os.getenv("REPO_NAME", "pytorch")
+DAYS_LIMIT = os.getenv("DAYS_LIMIT")  # Optional: None means all data
+
+# Generate repository slug for dynamic naming
+REPO_SLUG = f"{REPO_OWNER}_{REPO_NAME}".lower().replace("-", "_")
+REPO_FULL_NAME = f"{REPO_OWNER}/{REPO_NAME}"
+
+# Database Configuration
+# Use SQLite for development, PostgreSQL for production
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")  # development or production
+
+if ENVIRONMENT == "production":
+    # PostgreSQL for production
+    DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://localhost/{REPO_SLUG}_analysis")
+else:
+    # SQLite for development
+    DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/data/{REPO_SLUG}_analysis.db")
+    # Create data directory if it doesn't exist
+    (BASE_DIR / "data").mkdir(exist_ok=True)
+
+# Dynamic Table Names (based on repository) - updated by set_repo() when analyzing a specific repo
+TABLE_ITEMS = f"{REPO_SLUG}_items"
+TABLE_EMBEDDINGS = f"{REPO_SLUG}_items_with_embeddings"
+TABLE_CLUSTERED = f"{REPO_SLUG}_clustered_items"
+TABLE_CLUSTER_STATS = f"{REPO_SLUG}_cluster_stats"
+TABLE_CLUSTER_ANALYSES = f"{REPO_SLUG}_cluster_analyses"
+TABLE_CORRELATIONS = f"{REPO_SLUG}_correlations"
+
+
+def set_repo(owner: str, name: str) -> None:
+    """Set the current repository for this run. Updates DB name and table names from owner/name.
+
+    Call this at the start of analyze when repo is passed on the command line so the
+    database and tables are specific to that repo (e.g. encode/starlette -> encode_starlette_analysis.db).
+    """
+    global REPO_OWNER, REPO_NAME, REPO_SLUG, REPO_FULL_NAME
+    global DATABASE_URL
+    global TABLE_ITEMS, TABLE_EMBEDDINGS, TABLE_CLUSTERED
+    global TABLE_CLUSTER_STATS, TABLE_CLUSTER_ANALYSES, TABLE_CORRELATIONS
+
+    REPO_OWNER = owner
+    REPO_NAME = name
+    REPO_SLUG = f"{owner}_{name}".lower().replace("-", "_")
+    REPO_FULL_NAME = f"{owner}/{name}"
+
+    if ENVIRONMENT == "production":
+        DATABASE_URL = os.getenv("DATABASE_URL", f"postgresql://localhost/{REPO_SLUG}_analysis")
+    else:
+        DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/data/{REPO_SLUG}_analysis.db")
+        (BASE_DIR / "data").mkdir(exist_ok=True)
+
+    TABLE_ITEMS = f"{REPO_SLUG}_items"
+    TABLE_EMBEDDINGS = f"{REPO_SLUG}_items_with_embeddings"
+    TABLE_CLUSTERED = f"{REPO_SLUG}_clustered_items"
+    TABLE_CLUSTER_STATS = f"{REPO_SLUG}_cluster_stats"
+    TABLE_CLUSTER_ANALYSES = f"{REPO_SLUG}_cluster_analyses"
+    TABLE_CORRELATIONS = f"{REPO_SLUG}_correlations"
 
 # Budget
 BUDGET_LIMIT = float(os.getenv("BUDGET_LIMIT", "50.0"))
@@ -30,11 +88,6 @@ BUDGET_ALERT_THRESHOLD = int(os.getenv("BUDGET_ALERT_THRESHOLD", "80"))
 RLM_ROOT_MODEL = os.getenv("RLM_ROOT_MODEL", "gpt-3.5-turbo")
 RLM_SUB_MODEL = os.getenv("RLM_SUB_MODEL", "gpt-3.5-turbo")
 RLM_MAX_DEPTH = int(os.getenv("RLM_MAX_DEPTH", "3"))
-
-# Repository Configuration
-REPO_OWNER = os.getenv("REPO_OWNER", "pytorch")
-REPO_NAME = os.getenv("REPO_NAME", "pytorch")
-DAYS_LIMIT = os.getenv("DAYS_LIMIT")  # Optional: None means all data
 
 # Embedding Configuration
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
@@ -105,9 +158,11 @@ def print_config():
     print("\n" + "=" * 60)
     print("CONFIGURATION")
     print("=" * 60)
-    print(f"Repository: {REPO_OWNER}/{REPO_NAME}")
+    print(f"Environment: {ENVIRONMENT}")
+    print(f"Repository: {REPO_FULL_NAME}")
+    print(f"Repository Slug: {REPO_SLUG}")
     print(
-        f"Database: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}"
+        f"Database: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL.replace(str(BASE_DIR), '.')}"
     )
     print(f"Budget Limit: ${BUDGET_LIMIT:.2f}")
     print(f"RLM Root Model: {RLM_ROOT_MODEL}")
@@ -117,6 +172,10 @@ def print_config():
     if USE_SAMPLE_DATA:
         print(f"Sample Size: {SAMPLE_SIZE}")
     print(f"Outputs Directory: {OUTPUTS_DIR}")
+    print(f"\nDynamic Table Names:")
+    print(f"  Items: {TABLE_ITEMS}")
+    print(f"  Embeddings: {TABLE_EMBEDDINGS}")
+    print(f"  Clustered: {TABLE_CLUSTERED}")
     print("=" * 60 + "\n")
 
 

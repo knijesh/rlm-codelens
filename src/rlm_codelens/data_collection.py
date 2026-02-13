@@ -1,35 +1,43 @@
 """
 Data Collection Module
-Fetches PRs and Issues from PyTorch GitHub repository
+Fetches PRs and Issues from any GitHub repository
+Generic and repository-agnostic
 """
 
 import os
 from github import Github
 import pandas as pd
 from datetime import datetime, timedelta
-from utils.database import get_db_manager
-from config import (
+from rlm_codelens.utils.database import get_db_manager
+from rlm_codelens.config import (
     GITHUB_TOKEN,
     REPO_OWNER,
     REPO_NAME,
+    REPO_FULL_NAME,
     DAYS_LIMIT,
     USE_SAMPLE_DATA,
     SAMPLE_SIZE,
+    TABLE_ITEMS,
 )
 
 
-class PyTorchDataCollector:
-    """Collects data from PyTorch GitHub repository"""
+class RepositoryDataCollector:
+    """Collects data from any GitHub repository"""
 
-    def __init__(self, github_token=None):
+    def __init__(self, github_token=None, repo_owner=None, repo_name=None):
         self.token = github_token or GITHUB_TOKEN
         if not self.token:
             raise ValueError(
                 "GitHub token is required. Set GITHUB_TOKEN environment variable."
             )
 
+        # Allow override of repository
+        self.repo_owner = repo_owner or REPO_OWNER
+        self.repo_name = repo_name or REPO_NAME
+        self.repo_full_name = f"{self.repo_owner}/{self.repo_name}"
+
         self.g = Github(self.token)
-        self.repo = self.g.get_repo(f"{REPO_OWNER}/{REPO_NAME}")
+        self.repo = self.g.get_repo(self.repo_full_name)
         self.db = get_db_manager()
 
         print(f"✓ Connected to repository: {self.repo.full_name}")
@@ -195,13 +203,11 @@ class PyTorchDataCollector:
                 lambda x: ", ".join(x) if isinstance(x, list) else str(x)
             )
 
-        # Save to database
-        self.db.save_dataframe(combined, "pytorch_items", if_exists="replace")
+        # Save to database with dynamic table name
+        self.db.save_dataframe(combined, TABLE_ITEMS, if_exists="replace")
 
         # Create indexes
-        self.db.create_indexes(
-            "pytorch_items", ["number", "type", "author", "created_at"]
-        )
+        self.db.create_indexes(TABLE_ITEMS, ["number", "type", "author", "created_at"])
 
         return combined
 
@@ -221,30 +227,5 @@ class PyTorchDataCollector:
         return rate_limit
 
 
-def main():
-    """Run data collection"""
-    print("=" * 60)
-    print("PYTORCH DATA COLLECTION")
-    print("=" * 60)
-
-    # Initialize collector
-    collector = PyTorchDataCollector()
-
-    # Check rate limit
-    collector.get_rate_limit()
-
-    # Collect data
-    df = collector.collect_all()
-
-    print("\n✓ Data collection complete!")
-    print(f"  Total items: {len(df)}")
-
-    # Show sample
-    print("\n📋 Sample data:")
-    print(df.head(3)[["number", "type", "title", "author"]].to_string())
-
-    return df
-
-
-if __name__ == "__main__":
-    main()
+# Note: Use main.py as the single driver file for the entire pipeline
+# This module provides the RepositoryDataCollector class for data collection

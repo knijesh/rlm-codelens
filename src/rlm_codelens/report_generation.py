@@ -1,6 +1,7 @@
 """
 Report Generation Module
 Generates final analysis report with insights and visualizations
+Generic and repository-agnostic
 """
 
 import pandas as pd
@@ -8,81 +9,104 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 from pathlib import Path
-from utils.database import get_db_manager
-from utils.cost_tracker import CostTracker
+from rlm_codelens.utils.database import get_db_manager
+from rlm_codelens.utils.cost_tracker import CostTracker
+from rlm_codelens.config import (
+    REPO_FULL_NAME,
+    REPO_SLUG,
+    REPO_OWNER,
+    REPO_NAME,
+    TABLE_CLUSTERED,
+    TABLE_CLUSTER_ANALYSES,
+    TABLE_CORRELATIONS,
+)
 
 
 class ReportGenerator:
     """Generates comprehensive analysis report"""
-    
+
     def __init__(self):
         self.db = get_db_manager()
         self.outputs_dir = Path("outputs")
         self.outputs_dir.mkdir(exist_ok=True)
-        
+
         # Set style for plots
         sns.set_style("whitegrid")
-        plt.rcParams['figure.figsize'] = (12, 6)
-        plt.rcParams['font.size'] = 10
-        
+        plt.rcParams["figure.figsize"] = (12, 6)
+        plt.rcParams["font.size"] = 10
+
         print("✓ Report generator initialized")
-    
+
     def generate_executive_summary(self):
         """Generate final markdown report"""
         print("\n📝 Generating executive summary report...")
-        
+
         # Load all data
         try:
-            clusters = self.db.load_dataframe('cluster_analyses')
-            correlations = self.db.load_dataframe('correlations')
-            correlation_analysis = pd.read_json('outputs/correlation_analysis.json')
-            
+            clusters = self.db.load_dataframe(TABLE_CLUSTER_ANALYSES)
+            correlations = self.db.load_dataframe(TABLE_CORRELATIONS)
+
+            import json
+
+            correlation_analysis_path = self.outputs_dir / "correlation_analysis.json"
+            if correlation_analysis_path.exists():
+                with open(correlation_analysis_path) as f:
+                    correlation_analysis = json.load(f)
+            else:
+                correlation_analysis = {}
+
             report_sections = []
-            
+
             # Title and introduction
             report_sections.append(self._generate_header())
-            
+
             # Executive summary
-            report_sections.append(self._generate_executive_summary_section(clusters, correlations))
-            
+            report_sections.append(
+                self._generate_executive_summary_section(clusters, correlations)
+            )
+
             # Topic landscape
             report_sections.append(self._generate_topic_section(clusters))
-            
+
             # Correlation analysis
-            report_sections.append(self._generate_correlation_section(correlation_analysis))
-            
+            report_sections.append(
+                self._generate_correlation_section(correlation_analysis)
+            )
+
             # Key insights
-            report_sections.append(self._generate_insights_section(clusters, correlations))
-            
+            report_sections.append(
+                self._generate_insights_section(clusters, correlations)
+            )
+
             # Recommendations
             report_sections.append(self._generate_recommendations_section(clusters))
-            
+
             # Appendices
             report_sections.append(self._generate_appendices())
-            
+
             # Combine all sections
             full_report = "\n\n".join(report_sections)
-            
-            # Save report
-            report_path = self.outputs_dir / "pytorch_analysis_report.md"
-            with open(report_path, 'w') as f:
+
+            # Save report with dynamic filename
+            report_path = self.outputs_dir / f"{REPO_SLUG}_analysis_report.md"
+            with open(report_path, "w") as f:
                 f.write(full_report)
-            
+
             print(f"✓ Report saved: {report_path}")
-            
+
             return full_report
-            
+
         except Exception as e:
             print(f"⚠️  Could not generate full report: {e}")
             print("  Generating basic report...")
             return self._generate_basic_report()
-    
+
     def _generate_header(self):
         """Generate report header"""
-        return f"""# PyTorch Repository Analysis Report
+        return f"""# {REPO_NAME.title()} Repository Analysis Report
 
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
-**Repository:** pytorch/pytorch  
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**Repository:** {REPO_FULL_NAME}
 **Analysis Type:** Topic Clustering & Issue Correlations
 
 ---
@@ -99,26 +123,25 @@ class ReportGenerator:
 ---
 
 """
-    
+
     def _generate_executive_summary_section(self, clusters, correlations):
         """Generate executive summary"""
         # Load basic stats
-        items = self.db.load_dataframe('clustered_items')
-        
+        items = self.db.load_dataframe(TABLE_CLUSTERED)
+
         total_items = len(items)
         total_clusters = len(clusters)
         total_correlations = len(correlations) if correlations is not None else 0
-        
+
         return f"""## Executive Summary
 
-This report presents a comprehensive analysis of the PyTorch GitHub repository, examining **{total_items:,} issues and pull requests** to identify key topics, patterns, and correlations.
+This report presents a comprehensive analysis of the {REPO_FULL_NAME} GitHub repository, examining **{total_items:,} issues and pull requests** to identify key topics, patterns, and correlations.
 
 ### Key Findings
 
-- **{total_clusters} distinct topic clusters** were identified, ranging from CUDA/GPU support to autograd functionality
+- **{total_clusters} distinct topic clusters** were identified across the repository
 - **{total_correlations:,} correlations** discovered between issues, revealing hidden relationships and duplicate detection opportunities
-- The most active topic areas are related to performance optimization and mobile deployment
-- Several hub issues (highly connected) were identified that may represent core architectural challenges
+- Several hub issues (highly connected) were identified that may represent core challenges or common pain points
 
 ### Methodology
 
@@ -138,104 +161,132 @@ This analysis employed a multi-phase approach:
 | Total Items Analyzed | {total_items:,} |
 | Topic Clusters | {total_clusters} |
 | Correlations Found | {total_correlations:,} |
-| Analysis Date | {datetime.now().strftime('%Y-%m-%d')} |
+| Analysis Date | {datetime.now().strftime("%Y-%m-%d")} |
 
 ---
 
 """
-    
+
     def _generate_topic_section(self, clusters):
         """Generate topic landscape section"""
         sections = ["## Topic Landscape\n"]
-        
+
         # Overview
         sections.append("### Overview\n")
-        sections.append(f"Analysis identified {len(clusters)} major topic areas in PyTorch development. ")
-        sections.append("These topics represent the primary themes of community discussion and contribution.\n\n")
-        
+        sections.append(
+            f"Analysis identified {len(clusters)} major topic areas in {REPO_NAME} development. "
+        )
+        sections.append(
+            "These topics represent the primary themes of community discussion and contribution.\n\n"
+        )
+
         # Top topics
         sections.append("### Top Topics by Volume\n\n")
-        sections.append("| Rank | Topic | Category | Items | % of Total |\n")
-        sections.append("|------|-------|----------|-------|------------|\n")
-        
-        # Sort by size
-        sorted_clusters = clusters.sort_values('total_size', ascending=False).head(10)
+        sections.append("| Rank | Topic | Category |\n")
+        sections.append("|------|-------|-----------|\n")
+
+        # Use available size column
+        size_col = (
+            "total_size"
+            if "total_size" in clusters.columns
+            else "sample_size"
+            if "sample_size" in clusters.columns
+            else None
+        )
+
+        sorted_clusters = (
+            clusters.head(10)
+            if size_col is None
+            else clusters.sort_values(size_col, ascending=False).head(10)
+        )
         for i, (_, row) in enumerate(sorted_clusters.iterrows(), 1):
-            pct = (row['total_size'] / clusters['total_size'].sum()) * 100
-            sections.append(f"| {i} | {row['topic']} | {row['category']} | {row['total_size']} | {pct:.1f}% |\n")
-        
+            topic = row.get("topic", f"Cluster {row.get('cluster_id', i)}")
+            category = row.get("category", "Other")
+            sections.append(f"| {i} | {topic} | {category} |\n")
+
         # Topic descriptions
         sections.append("\n### Topic Descriptions\n\n")
         for _, row in sorted_clusters.head(5).iterrows():
-            sections.append(f"**{row['topic']}** ({row['category']})\n")
-            sections.append(f"- **Size:** {row['total_size']} items\n")
-            sections.append(f"- **Description:** {row.get('description', 'N/A')}\n")
-            sections.append(f"- **Key Terms:** {', '.join(row.get('key_terms', []))}\n\n")
-        
+            topic = row.get("topic", f"Cluster {row.get('cluster_id', '')}")
+            category = row.get("category", "Other")
+            description = row.get("description", "N/A")
+            sections.append(f"**{topic}** ({category})\n")
+            sections.append(f"- **Description:** {description}\n\n")
+
         return "".join(sections) + "\n---\n\n"
-    
+
     def _generate_correlation_section(self, correlation_analysis):
         """Generate correlation analysis section"""
         sections = ["## Correlation Analysis\n"]
-        
+
         try:
-            total_corr = correlation_analysis.get('total_correlations', 0)
-            breakdown = correlation_analysis.get('correlation_breakdown', {})
-            
+            total_corr = correlation_analysis.get("total_correlations", 0)
+            breakdown = correlation_analysis.get("correlation_breakdown", {})
+
             sections.append(f"### Overview\n")
-            sections.append(f"A total of **{total_corr:,} correlations** were discovered between issues, ")
-            sections.append("revealing relationships that span across topics, authors, and time.\n\n")
-            
+            sections.append(
+                f"A total of **{total_corr:,} correlations** were discovered between issues, "
+            )
+            sections.append(
+                "revealing relationships that span across topics, authors, and time.\n\n"
+            )
+
             sections.append("### Correlation Types\n\n")
             sections.append("| Type | Count | Description |\n")
             sections.append("|------|-------|-------------|\n")
-            
+
             type_descriptions = {
-                'text_similarity': 'Issues with similar content/titles (duplicates)',
-                'shared_label': 'Issues sharing the same GitHub labels',
-                'same_author': 'Issues by the same contributor',
-                'temporal_proximity': 'Issues created within 7 days',
-                'cross_reference': 'Issues explicitly mentioning each other'
+                "text_similarity": "Issues with similar content/titles (duplicates)",
+                "shared_label": "Issues sharing the same GitHub labels",
+                "same_author": "Issues by the same contributor",
+                "temporal_proximity": "Issues created within 7 days",
+                "cross_reference": "Issues explicitly mentioning each other",
             }
-            
+
             for corr_type, count in breakdown.items():
-                desc = type_descriptions.get(corr_type, 'Other')
-                sections.append(f"| {corr_type.replace('_', ' ').title()} | {count} | {desc} |\n")
-            
+                desc = type_descriptions.get(corr_type, "Other")
+                sections.append(
+                    f"| {corr_type.replace('_', ' ').title()} | {count} | {desc} |\n"
+                )
+
             # Most central issues
-            central = correlation_analysis.get('central_issues', [])
+            central = correlation_analysis.get("central_issues", [])
             if central:
                 sections.append("\n### Most Connected Issues\n\n")
-                sections.append("These issues have the highest number of correlations and may represent \")
-                sections.append("core architectural challenges or common pain points:\n\n")
-                
+                sections.append(
+                    "These issues have the highest number of correlations and may represent "
+                    "core architectural challenges or common pain points:\n\n"
+                )
+
                 sections.append("| Issue | Title | Connections | Topic |\n")
                 sections.append("|-------|-------|-------------|-------|\n")
-                
+
                 for issue in central[:10]:
-                    title = issue.get('title', '')[:50] + '...' if len(issue.get('title', '')) > 50 else issue.get('title', '')
-                    sections.append(f"| #{issue.get('number', 'N/A')} | {title} | {issue.get('degree', 0)} | {issue.get('topic', 'N/A')} |\n")
-        
+                    title = (
+                        issue.get("title", "")[:50] + "..."
+                        if len(issue.get("title", "")) > 50
+                        else issue.get("title", "")
+                    )
+                    sections.append(
+                        f"| #{issue.get('number', 'N/A')} | {title} | {issue.get('degree', 0)} | {issue.get('topic', 'N/A')} |\n"
+                    )
+
         except Exception as e:
             sections.append(f"\n*Error loading correlation data: {e}*\n")
-        
+
         return "".join(sections) + "\n---\n\n"
-    
+
     def _generate_insights_section(self, clusters, correlations):
         """Generate key insights section"""
-        return """## Key Insights
+        return f"""## Key Insights
 
 ### 1. Topic Evolution
 
-The analysis reveals several emerging and declining topics in PyTorch development:
-
-- **Rising Topics**: Mobile deployment, quantization, and TorchScript optimization
-- **Stable Topics**: CUDA support, autograd functionality, tensor operations
-- **Declining Topics**: Python 2 compatibility (as expected), legacy APIs
+The analysis reveals several emerging and declining topics in {REPO_NAME} development.
 
 ### 2. Community Patterns
 
-- Core contributors tend to specialize in specific areas (e.g., one contributor focuses primarily on ROCm support)
+- Core contributors tend to specialize in specific areas
 - Issues with the "bug" label cluster more distinctly than "feature request" issues
 - Cross-references between issues are most common in complex feature requests
 
@@ -247,7 +298,7 @@ The analysis reveals several emerging and declining topics in PyTorch developmen
 
 ### 4. Duplicate Detection
 
-Analysis identified approximately 8-12% of issues as potential duplicates based on:
+Analysis identified potential duplicates based on:
 - High text similarity (>85%)
 - Same labels + similar titles
 - Same author + temporal proximity
@@ -255,7 +306,7 @@ Analysis identified approximately 8-12% of issues as potential duplicates based 
 ---
 
 """
-    
+
     def _generate_recommendations_section(self, clusters):
         """Generate recommendations section"""
         return """## Recommendations
@@ -266,10 +317,7 @@ Analysis identified approximately 8-12% of issues as potential duplicates based 
 
 2. **Improve Duplicate Detection**: Implement automated duplicate detection using the text similarity model developed here. This could reduce issue triage workload by ~10%.
 
-3. **Topic-Based Routing**: Route issues to specialized maintainers based on the topic clusters identified. For example:
-   - CUDA/GPU issues → Hardware team
-   - Mobile issues → Edge deployment team
-   - API issues → Core framework team
+3. **Topic-Based Routing**: Route issues to specialized maintainers based on the topic clusters identified.
 
 4. **Documentation Gaps**: Topics with high issue volume may indicate documentation gaps. Consider:
    - Enhanced examples for common workflows
@@ -293,15 +341,15 @@ Analysis identified approximately 8-12% of issues as potential duplicates based 
 ---
 
 """
-    
+
     def _generate_appendices(self):
         """Generate appendices section"""
-        return """## Appendices
+        return f"""## Appendices
 
 ### A. Methodology Details
 
 **Data Collection**
-- Source: GitHub API (pytorch/pytorch repository)
+- Source: GitHub API ({REPO_FULL_NAME} repository)
 - Items: Issues and Pull Requests (state: all)
 - Metadata: Title, body, labels, author, timestamps
 
@@ -349,14 +397,15 @@ All analysis data is available in the `outputs/` directory:
 
 ---
 
-*Report generated by PyTorch RLM Analysis Pipeline*
+*Report generated by RLM-Codelens Analysis Pipeline*
 """
-    
+
     def _generate_basic_report(self):
         """Generate basic report if full data not available"""
-        return f"""# PyTorch Repository Analysis Report
+        report = f"""# {REPO_NAME.title()} Repository Analysis Report
 
-**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**Repository:** {REPO_FULL_NAME}
 
 ## Status
 
@@ -376,177 +425,224 @@ Basic report generated. Full analysis data may not be available in database.
 
 ---
 
-*Basic report generated by PyTorch RLM Analysis Pipeline*
+*Basic report generated by RLM-Codelens Analysis Pipeline*
 """
-    
+        # Save basic report with dynamic filename
+        report_path = self.outputs_dir / f"{REPO_SLUG}_analysis_report.md"
+        with open(report_path, "w") as f:
+            f.write(report)
+        print(f"✓ Basic report saved: {report_path}")
+        return report
+
     def generate_visualizations(self):
         """Generate static visualization charts"""
         print("\n📊 Generating visualization charts...")
-        
+
         try:
             # Load data
-            df = self.db.load_dataframe('clustered_items')
-            clusters = self.db.load_dataframe('cluster_analyses')
-            
+            df = self.db.load_dataframe(TABLE_CLUSTERED)
+            clusters = self.db.load_dataframe(TABLE_CLUSTER_ANALYSES)
+
             # 1. Topic distribution
             self._plot_topic_distribution(df, clusters)
-            
+
             # 2. Timeline of topics
             self._plot_topic_timeline(df, clusters)
-            
+
             # 3. Category distribution
             self._plot_category_distribution(clusters)
-            
+
             # 4. Issue vs PR distribution
             self._plot_type_distribution(df)
-            
+
             print(f"✓ Charts saved to {self.outputs_dir}/")
-            
+
         except Exception as e:
             print(f"⚠️  Could not generate all charts: {e}")
-    
+
     def _plot_topic_distribution(self, df, clusters):
         """Plot topic distribution"""
         plt.figure(figsize=(14, 8))
-        
+
         # Get top 15 topics
-        topic_counts = df[df['cluster_id'] != -1]['cluster_id'].value_counts().head(15)
-        
+        topic_counts = df[df["cluster_id"] != -1]["cluster_id"].value_counts().head(15)
+
         # Get topic names
         topic_names = []
         for cluster_id in topic_counts.index:
-            cluster_row = clusters[clusters['cluster_id'] == cluster_id]
+            cluster_row = clusters[clusters["cluster_id"] == cluster_id]
             if not cluster_row.empty:
-                topic_names.append(cluster_row.iloc[0]['topic'])
+                topic_names.append(cluster_row.iloc[0]["topic"])
             else:
                 topic_names.append(f"Cluster {cluster_id}")
-        
+
         # Create bar plot
-        bars = plt.bar(range(len(topic_counts)), topic_counts.values, color='#667eea', alpha=0.8)
-        plt.xlabel('Topic', fontsize=12, fontweight='bold')
-        plt.ylabel('Number of Issues/PRs', fontsize=12, fontweight='bold')
-        plt.title('Top 15 Topics in PyTorch Repository', fontsize=14, fontweight='bold', pad=20)
-        plt.xticks(range(len(topic_counts)), topic_names, rotation=45, ha='right')
-        plt.grid(axis='y', alpha=0.3)
-        
+        bars = plt.bar(
+            range(len(topic_counts)), topic_counts.values, color="#667eea", alpha=0.8
+        )
+        plt.xlabel("Topic", fontsize=12, fontweight="bold")
+        plt.ylabel("Number of Issues/PRs", fontsize=12, fontweight="bold")
+        plt.title(
+            f"Top 15 Topics in {REPO_NAME.title()} Repository",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        plt.xticks(range(len(topic_counts)), topic_names, rotation=45, ha="right")
+        plt.grid(axis="y", alpha=0.3)
+
         # Add value labels on bars
         for i, (bar, value) in enumerate(zip(bars, topic_counts.values)):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 10,
-                    str(value), ha='center', va='bottom', fontsize=9)
-        
+            plt.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 10,
+                str(value),
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+
         plt.tight_layout()
-        plt.savefig(self.outputs_dir / 'topic_distribution.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.outputs_dir / "topic_distribution.png", dpi=300, bbox_inches="tight"
+        )
         plt.close()
-        
+
         print("  ✓ topic_distribution.png")
-    
+
     def _plot_topic_timeline(self, df, clusters):
         """Plot topic evolution over time"""
         plt.figure(figsize=(15, 8))
-        
+
         # Prepare data
-        df['month'] = pd.to_datetime(df['created_at']).dt.to_period('M')
-        
+        df["month"] = pd.to_datetime(df["created_at"]).dt.to_period("M")
+
         # Get top 5 topics
-        top_clusters = df[df['cluster_id'] != -1]['cluster_id'].value_counts().head(5).index
-        
+        top_clusters = (
+            df[df["cluster_id"] != -1]["cluster_id"].value_counts().head(5).index
+        )
+
         # Plot each topic
         for cluster_id in top_clusters:
-            cluster_data = df[df['cluster_id'] == cluster_id]
-            monthly_counts = cluster_data.groupby('month').size()
-            
+            cluster_data = df[df["cluster_id"] == cluster_id]
+            monthly_counts = cluster_data.groupby("month").size()
+
             # Get topic name
-            cluster_row = clusters[clusters['cluster_id'] == cluster_id]
-            topic_name = cluster_row.iloc[0]['topic'] if not cluster_row.empty else f"Cluster {cluster_id}"
-            
-            plt.plot(monthly_counts.index.astype(str), monthly_counts.values,
-                    marker='o', linewidth=2, markersize=6, label=topic_name)
-        
-        plt.xlabel('Month', fontsize=12, fontweight='bold')
-        plt.ylabel('Number of Issues/PRs', fontsize=12, fontweight='bold')
-        plt.title('Topic Evolution Over Time (Top 5 Topics)', fontsize=14, fontweight='bold', pad=20)
-        plt.legend(loc='upper left', framealpha=0.9)
+            cluster_row = clusters[clusters["cluster_id"] == cluster_id]
+            topic_name = (
+                cluster_row.iloc[0]["topic"]
+                if not cluster_row.empty
+                else f"Cluster {cluster_id}"
+            )
+
+            plt.plot(
+                monthly_counts.index.astype(str),
+                monthly_counts.values,
+                marker="o",
+                linewidth=2,
+                markersize=6,
+                label=topic_name,
+            )
+
+        plt.xlabel("Month", fontsize=12, fontweight="bold")
+        plt.ylabel("Number of Issues/PRs", fontsize=12, fontweight="bold")
+        plt.title(
+            "Topic Evolution Over Time (Top 5 Topics)",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        plt.legend(loc="upper left", framealpha=0.9)
         plt.grid(True, alpha=0.3)
         plt.xticks(rotation=45)
         plt.tight_layout()
-        plt.savefig(self.outputs_dir / 'topic_timeline.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.outputs_dir / "topic_timeline.png", dpi=300, bbox_inches="tight"
+        )
         plt.close()
-        
+
         print("  ✓ topic_timeline.png")
-    
+
     def _plot_category_distribution(self, clusters):
         """Plot category distribution"""
         plt.figure(figsize=(10, 6))
-        
-        category_counts = clusters['category'].value_counts()
-        
-        colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe']
-        bars = plt.bar(category_counts.index, category_counts.values,
-                      color=colors[:len(category_counts)], alpha=0.8)
-        
-        plt.xlabel('Category', fontsize=12, fontweight='bold')
-        plt.ylabel('Number of Topics', fontsize=12, fontweight='bold')
-        plt.title('Distribution of Issue/PR Categories', fontsize=14, fontweight='bold', pad=20)
-        plt.grid(axis='y', alpha=0.3)
-        
+
+        category_counts = clusters["category"].value_counts()
+
+        colors = ["#667eea", "#764ba2", "#f093fb", "#f5576c", "#4facfe", "#00f2fe"]
+        bars = plt.bar(
+            category_counts.index,
+            category_counts.values,
+            color=colors[: len(category_counts)],
+            alpha=0.8,
+        )
+
+        plt.xlabel("Category", fontsize=12, fontweight="bold")
+        plt.ylabel("Number of Topics", fontsize=12, fontweight="bold")
+        plt.title(
+            "Distribution of Issue/PR Categories",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        plt.grid(axis="y", alpha=0.3)
+
         # Add value labels
         for bar in bars:
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{int(height)}',
-                    ha='center', va='bottom', fontsize=10)
-        
+            plt.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{int(height)}",
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
+
         plt.tight_layout()
-        plt.savefig(self.outputs_dir / 'category_distribution.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.outputs_dir / "category_distribution.png", dpi=300, bbox_inches="tight"
+        )
         plt.close()
-        
+
         print("  ✓ category_distribution.png")
-    
+
     def _plot_type_distribution(self, df):
         """Plot issue vs PR distribution"""
         plt.figure(figsize=(8, 6))
-        
-        type_counts = df['type'].value_counts()
-        
-        colors = ['#667eea', '#764ba2']
-        wedges, texts, autotexts = plt.pie(type_counts.values, labels=type_counts.index,
-                                          autopct='%1.1f%%', startangle=90,
-                                          colors=colors, textprops={'fontsize': 12})
-        
+
+        type_counts = df["type"].value_counts()
+
+        colors = ["#667eea", "#764ba2"]
+        wedges, texts, autotexts = plt.pie(
+            type_counts.values,
+            labels=type_counts.index,
+            autopct="%1.1f%%",
+            startangle=90,
+            colors=colors,
+            textprops={"fontsize": 12},
+        )
+
         # Enhance text
         for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontweight('bold')
-        
-        plt.title('Distribution of Issues vs Pull Requests', fontsize=14, fontweight='bold', pad=20)
-        plt.axis('equal')
+            autotext.set_color("white")
+            autotext.set_fontweight("bold")
+
+        plt.title(
+            "Distribution of Issues vs Pull Requests",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        plt.axis("equal")
         plt.tight_layout()
-        plt.savefig(self.outputs_dir / 'type_distribution.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.outputs_dir / "type_distribution.png", dpi=300, bbox_inches="tight"
+        )
         plt.close()
-        
+
         print("  ✓ type_distribution.png")
 
 
-def main():
-    """Run report generation"""
-    print("="*60)
-    print("REPORT GENERATION")
-    print("="*60)
-    
-    generator = ReportGenerator()
-    
-    # Generate report
-    report = generator.generate_executive_summary()
-    
-    # Generate visualizations
-    generator.generate_visualizations()
-    
-    print("\n✅ Report generation complete!")
-    print("  📄 Report: outputs/pytorch_analysis_report.md")
-    print("  📊 Charts: outputs/*.png")
-    
-    return report
-
-
-if __name__ == "__main__":
-    main()
+# Note: Use main.py as the single driver file for the entire pipeline
+# This module provides the ReportGenerator class for generating reports

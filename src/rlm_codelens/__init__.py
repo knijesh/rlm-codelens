@@ -11,15 +11,31 @@ Example:
 """
 
 __version__ = "0.1.0"
-__author__ = "Your Name"
-__email__ = "your.email@example.com"
+__author__ = "Nijesh Kanjinghat"
+__email__ = "nijesh@example.com"
 __license__ = "MIT"
 
-from .core.analyzer import RepositoryAnalyzer
-from .core.config import Config
+from rlm_codelens.core.analyzer import RepositoryAnalyzer
+from rlm_codelens.core.config import Config
+
+# Import utility classes for convenience
+from rlm_codelens.utils import (
+    CostTracker,
+    CostCalculator,
+    CostEstimator,
+    SecureRLMClient,
+    DatabaseManager,
+)
 
 __all__ = [
     "RepositoryAnalyzer",
     "Config",
+    "CostTracker",
+    "CostCalculator",
+    "CostEstimator",
+    "SecureRLMClient",
+    "DatabaseManager",
     "__version__",
+    "__author__",
+    "__license__",
 ]

@@ -16,15 +16,24 @@ import json
 class IssueCorrelationAnalyzer:
     """Analyzes correlations between issues using multiple signals"""
 
-    def __init__(self, db_url="postgresql://localhost/pytorch_analysis"):
-        self.engine = create_engine(db_url)
+    def __init__(self, db_url=None):
+        from rlm_codelens.config import (
+            DATABASE_URL,
+            TABLE_CLUSTERED,
+            TABLE_CLUSTER_ANALYSES,
+        )
+
+        self.engine = create_engine(db_url or DATABASE_URL)
+        self.table_clustered = TABLE_CLUSTERED
+        self.table_cluster_analyses = TABLE_CLUSTER_ANALYSES
         self.correlations = []
         self.graph = nx.Graph()
 
     def load_data(self) -> pd.DataFrame:
         """Load issue data with embeddings"""
-        query = """
-        SELECT 
+        # Try query with cluster_analyses join first
+        query_with_analysis = f"""
+        SELECT
             i.number,
             i.title,
             i.body,
@@ -36,11 +45,58 @@ class IssueCorrelationAnalyzer:
             c.topic,
             c.category,
             i.embedding
-        FROM clustered_items i
-        LEFT JOIN cluster_analyses c ON i.cluster_id = c.cluster_id
+        FROM {self.table_clustered} i
+        LEFT JOIN {self.table_cluster_analyses} c ON i.cluster_id = c.cluster_id
         WHERE i.type = 'issue'
         """
-        return pd.read_sql(query, self.engine)
+
+        # Fallback query without cluster_analyses
+        query_simple = f"""
+        SELECT
+            i.number,
+            i.title,
+            i.body,
+            i.labels,
+            i.author,
+            i.created_at,
+            i.type,
+            i.cluster_id,
+            NULL as topic,
+            NULL as category,
+            i.embedding
+        FROM {self.table_clustered} i
+        WHERE i.type = 'issue'
+        """
+
+        try:
+            df = pd.read_sql(query_with_analysis, self.engine)
+        except Exception:
+            # If cluster_analyses doesn't exist, use simple query
+            df = pd.read_sql(query_simple, self.engine)
+
+        # Parse JSON embeddings back to lists
+        import json
+
+        if "embedding" in df.columns:
+            df["embedding"] = df["embedding"].apply(
+                lambda x: json.loads(x)
+                if isinstance(x, str) and x.startswith("[")
+                else x
+            )
+
+        # Parse labels from comma-separated strings to lists
+        if "labels" in df.columns:
+            df["labels"] = df["labels"].apply(
+                lambda x: [l.strip() for l in x.split(",") if l.strip()]
+                if isinstance(x, str)
+                else (x if isinstance(x, list) else [])
+            )
+
+        # Parse dates to datetime objects
+        if "created_at" in df.columns:
+            df["created_at"] = pd.to_datetime(df["created_at"])
+
+        return df
 
     def find_correlations(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -137,13 +193,13 @@ class IssueCorrelationAnalyzer:
                         idx1, idx2 = indices[i], indices[j]
                         correlations.append(
                             {
-                                "source": int(df.iloc[idx1]["number"]),
-                                "target": int(df.iloc[idx2]["number"]),
+                                "source": int(df.loc[idx1, "number"]),
+                                "target": int(df.loc[idx2, "number"]),
                                 "type": "shared_label",
                                 "strength": 0.8,
                                 "label": label,
-                                "source_title": df.iloc[idx1]["title"],
-                                "target_title": df.iloc[idx2]["title"],
+                                "source_title": df.loc[idx1, "title"],
+                                "target_title": df.loc[idx2, "title"],
                             }
                         )
 
@@ -164,13 +220,13 @@ class IssueCorrelationAnalyzer:
                         idx1, idx2 = indices[i], indices[j]
                         correlations.append(
                             {
-                                "source": int(df.iloc[idx1]["number"]),
-                                "target": int(df.iloc[idx2]["number"]),
+                                "source": int(df.loc[idx1, "number"]),
+                                "target": int(df.loc[idx2, "number"]),
                                 "type": "same_author",
                                 "strength": 0.6,
                                 "author": author,
-                                "source_title": df.iloc[idx1]["title"],
-                                "target_title": df.iloc[idx2]["title"],
+                                "source_title": df.loc[idx1, "title"],
+                                "target_title": df.loc[idx2, "title"],
                             }
                         )
 
@@ -363,24 +419,31 @@ class IssueCorrelationAnalyzer:
         # Calculate centrality metrics
         degree_centrality = nx.degree_centrality(G)
         betweenness_centrality = nx.betweenness_centrality(G)
-        eigenvector_centrality = nx.eigenvector_centrality(G, max_iter=1000)
+        try:
+            eigenvector_centrality = nx.eigenvector_centrality(G, max_iter=1000)
+        except nx.PowerIterationFailedConvergence:
+            # Fallback for small or disconnected graphs
+            eigenvector_centrality = {node: 0.0 for node in G.nodes()}
 
         # Combine metrics
         issues = []
         for node_id in G.nodes():
+            # Handle None values in centrality metrics
+            deg_cent = degree_centrality.get(node_id, 0.0) or 0.0
+            bet_cent = betweenness_centrality.get(node_id, 0.0) or 0.0
+            eig_cent = eigenvector_centrality.get(node_id, 0.0) or 0.0
+
             issues.append(
                 {
                     "number": node_id,
                     "title": G.nodes[node_id].get("title", ""),
                     "topic": G.nodes[node_id].get("topic", "Unknown"),
                     "degree": G.degree(node_id),
-                    "degree_centrality": degree_centrality[node_id],
-                    "betweenness_centrality": betweenness_centrality[node_id],
-                    "eigenvector_centrality": eigenvector_centrality[node_id],
+                    "degree_centrality": deg_cent,
+                    "betweenness_centrality": bet_cent,
+                    "eigenvector_centrality": eig_cent,
                     "composite_score": (
-                        degree_centrality[node_id] * 0.4
-                        + betweenness_centrality[node_id] * 0.3
-                        + eigenvector_centrality[node_id] * 0.3
+                        deg_cent * 0.4 + bet_cent * 0.3 + eig_cent * 0.3
                     ),
                 }
             )

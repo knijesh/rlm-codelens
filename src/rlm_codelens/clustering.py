@@ -8,8 +8,14 @@ import numpy as np
 from hdbscan import HDBSCAN
 from sklearn.cluster import DBSCAN
 from collections import defaultdict, Counter
-from utils.database import get_db_manager
-from config import MIN_CLUSTER_SIZE, MIN_SAMPLES
+from rlm_codelens.utils.database import get_db_manager
+from rlm_codelens.config import (
+    MIN_CLUSTER_SIZE,
+    MIN_SAMPLES,
+    TABLE_EMBEDDINGS,
+    TABLE_CLUSTERED,
+    TABLE_CLUSTER_STATS,
+)
 
 
 class TopicClusterer:
@@ -18,6 +24,8 @@ class TopicClusterer:
     def __init__(self, min_cluster_size=None, min_samples=None):
         self.min_cluster_size = min_cluster_size or MIN_CLUSTER_SIZE
         self.min_samples = min_samples or MIN_SAMPLES
+        # Auto-adjust for small datasets (will be applied in cluster())
+        self._auto_adjust = True
         self.db = get_db_manager()
 
         print(f"✓ Topic clusterer initialized")
@@ -25,21 +33,31 @@ class TopicClusterer:
         print(f"  Min cluster size: {self.min_cluster_size}")
         print(f"  Min samples: {self.min_samples}")
 
-    def cluster(self, table_name="pytorch_items_with_embeddings"):
+    def cluster(self, table_name=None):
         """
         Cluster items by topic
 
         Args:
-            table_name: Table with embeddings
+            table_name: Table with embeddings (defaults to TABLE_EMBEDDINGS from config)
 
         Returns:
             DataFrame with cluster assignments
         """
+        table_name = table_name or TABLE_EMBEDDINGS
         print(f"\n🎯 Clustering items by topic...")
+        print(f"  Source table: {table_name}")
 
         # Load data with embeddings
-        df = self.db.load_dataframe(table_name)
+        df = self.db.load_dataframe(table_name, parse_embeddings=True)
         print(f"  Loaded {len(df)} items")
+
+        # Ensure labels are lists (they may be stored as comma-separated strings)
+        if "labels" in df.columns:
+            df["labels"] = df["labels"].apply(
+                lambda x: [l.strip() for l in x.split(",") if l.strip()]
+                if isinstance(x, str)
+                else (x if isinstance(x, list) else [])
+            )
 
         # Filter out items without embeddings
         df_valid = df[df["embedding"].notna()].copy()
@@ -48,6 +66,16 @@ class TopicClusterer:
         if len(df_valid) == 0:
             raise ValueError("No valid embeddings found. Run embeddings.py first.")
 
+        # Auto-adjust clustering parameters for small datasets
+        min_cluster_size = self.min_cluster_size
+        min_samples = self.min_samples
+        if self._auto_adjust and len(df_valid) < min_cluster_size * 3:
+            min_cluster_size = max(2, len(df_valid) // 5)
+            min_samples = max(2, min(min_samples, min_cluster_size))
+            print(
+                f"  ⚠️  Auto-adjusted for small dataset: min_cluster_size={min_cluster_size}, min_samples={min_samples}"
+            )
+
         # Convert embeddings to numpy array
         print("  Preparing embedding matrix...")
         embeddings = np.array(df_valid["embedding"].tolist())
@@ -55,8 +83,8 @@ class TopicClusterer:
         # Run HDBSCAN clustering
         print(f"  Running HDBSCAN...")
         clusterer = HDBSCAN(
-            min_cluster_size=self.min_cluster_size,
-            min_samples=self.min_samples,
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
             metric="euclidean",
             cluster_selection_method="eom",  # Excess of Mass
         )
@@ -79,7 +107,10 @@ class TopicClusterer:
         # Save to database
         self._save_to_database(df_clustered)
 
-        return df_clustered
+        # Generate stats for return
+        cluster_stats = self.get_cluster_stats(df_clustered)
+
+        return df_clustered, cluster_stats
 
     def _analyze_clusters(self, df):
         """Analyze and print cluster statistics"""
@@ -155,59 +186,61 @@ class TopicClusterer:
         """Save clustered data to database"""
         print("\n💾 Saving clustered data to database...")
 
-        # Save main table
-        self.db.save_dataframe(df, "clustered_items", if_exists="replace")
+        # Convert embedding vectors to JSON strings for SQLite compatibility
+        import json
 
-        # Generate and save cluster statistics
+        df_to_save = df.copy()
+        if "embedding" in df_to_save.columns:
+            df_to_save["embedding"] = df_to_save["embedding"].apply(
+                lambda x: json.dumps(x) if isinstance(x, list) else x
+            )
+
+        # Convert labels lists back to comma-separated strings for SQLite compatibility
+        if "labels" in df_to_save.columns:
+            df_to_save["labels"] = df_to_save["labels"].apply(
+                lambda x: ", ".join(x) if isinstance(x, list) else str(x) if x else ""
+            )
+
+        # Save main table with dynamic name
+        self.db.save_dataframe(df_to_save, TABLE_CLUSTERED, if_exists="replace")
+
+        # Generate and save cluster statistics (always save so RLM analysis can load the table)
         cluster_stats = self.get_cluster_stats(df)
-        self.db.save_dataframe(cluster_stats, "cluster_stats", if_exists="replace")
+        if cluster_stats.empty:
+            # Ensure table exists with expected schema so downstream (e.g. rlm_analysis) doesn't fail
+            cluster_stats = pd.DataFrame(
+                columns=[
+                    "cluster_id", "size", "issue_count", "pr_count",
+                    "top_labels", "top_authors", "date_range", "sample_titles",
+                ]
+            )
+            print("  ⚠️  No clusters found, saving empty cluster_stats table")
+        else:
+            # Convert complex types to JSON strings for SQLite compatibility
+            for col in ["top_labels", "top_authors", "date_range", "sample_titles"]:
+                if col in cluster_stats.columns:
+                    cluster_stats[col] = cluster_stats[col].apply(
+                        lambda x: json.dumps(x, default=str) if x is not None else None
+                    )
+        self.db.save_dataframe(
+            cluster_stats, TABLE_CLUSTER_STATS, if_exists="replace"
+        )
 
         # Create indexes
-        self.db.create_indexes("clustered_items", ["cluster_id", "number", "type"])
+        self.db.create_indexes(TABLE_CLUSTERED, ["cluster_id", "number", "type"])
 
         print("✓ Clustered data saved successfully")
 
     def get_cluster_items(self, cluster_id):
         """Get all items in a specific cluster"""
-        df = self.db.load_dataframe("clustered_items")
+        df = self.db.load_dataframe(TABLE_CLUSTERED, parse_embeddings=True)
         return df[df["cluster_id"] == cluster_id]
 
     def get_noise_items(self):
         """Get all unclustered items (noise)"""
-        df = self.db.load_dataframe("clustered_items")
+        df = self.db.load_dataframe(TABLE_CLUSTERED, parse_embeddings=True)
         return df[df["cluster_id"] == -1]
 
 
-def main():
-    """Run clustering"""
-    print("=" * 60)
-    print("TOPIC CLUSTERING")
-    print("=" * 60)
-
-    # Initialize clusterer
-    clusterer = TopicClusterer()
-
-    # Run clustering
-    df = clusterer.cluster()
-
-    # Get statistics
-    stats = clusterer.get_cluster_stats(df)
-
-    print("\n✓ Clustering complete!")
-    print(f"  Total clusters: {len(stats)}")
-    print(f"  Total items clustered: {stats['size'].sum()}")
-
-    # Show sample of largest cluster
-    if len(stats) > 0:
-        largest = stats.loc[stats["size"].idxmax()]
-        print(f"\n📌 Largest cluster (ID {largest['cluster_id']}):")
-        print(f"  Size: {largest['size']} items")
-        print(f"  Sample titles:")
-        for title in largest["sample_titles"][:3]:
-            print(f"    - {title[:80]}...")
-
-    return df, stats
-
-
-if __name__ == "__main__":
-    main()
+# Note: Use main.py as the single driver file for the entire pipeline
+# This module provides the TopicClusterer class for clustering

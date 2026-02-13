@@ -6,7 +6,7 @@ Helps stay within budget limits
 import json
 from datetime import datetime
 from pathlib import Path
-from config import BUDGET_LIMIT, BUDGET_ALERT_THRESHOLD, COSTS
+from rlm_codelens.config import BUDGET_LIMIT, BUDGET_ALERT_THRESHOLD, COSTS
 
 
 class CostTracker:
@@ -14,7 +14,9 @@ class CostTracker:
 
     def __init__(self, budget_limit=BUDGET_LIMIT, log_file=None):
         self.budget_limit = budget_limit
-        self.alert_threshold = budget_limit * (BUDGET_ALERT_THRESHOLD / 100)
+        # Handle case where BUDGET_ALERT_THRESHOLD might be None
+        alert_pct = BUDGET_ALERT_THRESHOLD if BUDGET_ALERT_THRESHOLD is not None else 80
+        self.alert_threshold = budget_limit * (alert_pct / 100)
         self.current_cost = 0.0
         self.cost_breakdown = {}
         self.calls_log = []
