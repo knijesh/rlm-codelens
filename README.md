@@ -157,8 +157,8 @@ analysis.save("architecture.json")
 ```
 # Sample Output
 
-[Sample_RLM_Output](sample_outputs/RLM_sample.png)
-[Sample_RLM_Output_2](sample_output/RLM_Sample_2.png)
+[Sample_RLM_Output](samples/RLM_sample.png)
+[Sample_RLM_Output_2](samples/RLM_Sample_2.png)
 
 ## Contributing
 
