@@ -56,7 +56,15 @@ uv run rlmc visualize-arch arch.json
 Or use the pipeline script:
 
 ```bash
-./run_analysis.sh /path/to/repo myproject
+./run_analysis.sh /path/to/repo myproject 
+
+#To Run RLM Analysis Explicitly one shot use the below command
+
+ ./run_analysis.sh https://github.com/reponame --deep
+
+# Uses "myproject" as the output name/prefix and generates:
+# - outputs/myproject_viz.html   (interactive visualization)
+# - outputs/myproject_report.html (detailed architecture report)
 ```
 
 ### Self-Scan Demo (no API keys needed)
@@ -82,9 +90,10 @@ uv run rlmc analyze-architecture scan.json --deep --backend anthropic --model cl
 
 | Command | Description |
 |---------|-------------|
-| `rlmc scan-repo <path>` | Parse all Python files using AST; extract imports, classes, functions |
+| `rlmc scan-repo <path>` | Parse all Python files using AST; extract imports, classes, functions (supports `--name <label>` to tag the analysis/output prefix) |
 | `rlmc analyze-architecture <scan.json>` | Build dependency graph, detect cycles, layers, anti-patterns |
 | `rlmc visualize-arch <analysis.json>` | Generate interactive D3.js visualization |
+| `rlmc generate-report <analysis.json>` | Generate standalone HTML architecture report |
 
 ## Configuration
 
@@ -158,6 +167,7 @@ analysis.save("architecture.json")
 # Sample Output
 
 [Sample_RLM_Output](samples/RLM_sample.png)
+
 [Sample_RLM_Output_2](samples/RLM_Sample_2.png)
 
 ## Contributing
