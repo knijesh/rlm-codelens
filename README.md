@@ -239,7 +239,7 @@ analysis.save("architecture.json")
 
 [Interactive_architecture_visualization]
 
-<img src="samples/Pytorch_interactive_viz.png)" width="500"/>
+<img src="samples/Pytorch_interactive_viz.png" width="500"/>
 
 
 ## Contributing
