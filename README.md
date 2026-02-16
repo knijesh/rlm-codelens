@@ -155,6 +155,10 @@ print(f"{len(analysis.anti_patterns)} anti-patterns")
 # Save
 analysis.save("architecture.json")
 ```
+# Sample Output
+
+[Sample_RLM_Output](sample_outputs/RLM_sample.png)
+[Sample_RLM_Output_2](sample_output/RLM_Sample_2.png)
 
 ## Contributing
 

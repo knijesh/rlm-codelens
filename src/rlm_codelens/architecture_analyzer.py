@@ -5,7 +5,7 @@ Uses the real RLM API to perform semantic analysis that goes beyond static
 AST parsing: module classification, hidden dependency discovery, architectural
 pattern detection, and refactoring suggestions.
 
-Requires: pip install rlms  (or the optional [rlm] extra)
+Requires: pip install 'rlm-codelens[rlm]'  (or the rlm package directly)
 
 Example:
     >>> analyzer = ArchitectureRLMAnalyzer(scan_data, backend="openai", model="gpt-4o")
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from rlm_codelens.repo_scanner import RepositoryStructure
 
 try:
-    from rlms import RLM
+    from rlm import RLM  # type: ignore
 
     RLM_AVAILABLE = True
 except ImportError:
@@ -44,19 +44,41 @@ class RLMCostTracker:
     call_log: List[Dict[str, Any]] = field(default_factory=list)
 
     def record(self, result: Any, label: str = "") -> None:
-        """Record usage from an RLM completion result."""
-        usage = getattr(result, "usage", None)
+        """Record usage from an RLM completion result.
+
+        The RLM library returns RLMChatCompletion with a usage_summary
+        containing per-model token counts. We estimate cost from tokens.
+        """
         cost = 0.0
-        if usage:
-            cost = getattr(usage, "total_cost", 0.0) or 0.0
+        total_tokens = 0
+
+        # RLMChatCompletion has .usage_summary.model_usage_summaries
+        usage_summary = getattr(result, "usage_summary", None)
+        if usage_summary:
+            model_summaries = getattr(usage_summary, "model_usage_summaries", {})
+            if isinstance(model_summaries, dict):
+                for model_usage in model_summaries.values():
+                    input_tokens = getattr(model_usage, "total_input_tokens", 0) or 0
+                    output_tokens = getattr(model_usage, "total_output_tokens", 0) or 0
+                    total_tokens += input_tokens + output_tokens
+                    # Rough cost estimate: $2.50/1M input, $10/1M output (gpt-4o rates)
+                    cost += (input_tokens / 1_000_000) * 2.50
+                    cost += (output_tokens / 1_000_000) * 10.0
+
+        # Fallback: check for .usage.total_cost (legacy/mock interface)
+        if cost == 0.0:
+            usage = getattr(result, "usage", None)
+            if usage:
+                cost = getattr(usage, "total_cost", 0.0) or 0.0
 
         self.total_cost += cost
         self.calls += 1
         self.call_log.append(
             {
                 "label": label,
-                "cost": cost,
-                "cumulative": self.total_cost,
+                "cost": round(cost, 6),
+                "tokens": total_tokens,
+                "cumulative": round(self.total_cost, 6),
             }
         )
 
@@ -109,9 +131,9 @@ class ArchitectureRLMAnalyzer:
         if not RLM_AVAILABLE:
             raise ImportError(
                 "RLM library not installed. Install with:\n"
-                "  pip install rlms\n"
-                "Or install the optional extra:\n"
-                "  pip install 'rlm-codelens[rlm]'"
+                "  pip install 'rlm-codelens[rlm]'\n"
+                "Or install directly:\n"
+                "  pip install rlms"
             )
 
         self.structure = structure
@@ -184,12 +206,9 @@ Modules:
 For each module, output a JSON object mapping the module path to its layer.
 Example: {{"src/app/models.py": "data", "src/app/views.py": "api"}}
 
-Output ONLY the JSON object, no other text. Use FINAL() to return the JSON string."""
+Output ONLY the JSON object, no other text."""
 
-        result = self.rlm.completion(
-            prompt=prompt,
-            setup_code="import json",
-        )
+        result = self.rlm.completion(prompt=prompt)
 
         self.cost_tracker.record(result, "classify_modules")
 
@@ -257,12 +276,9 @@ Output a JSON array of hidden dependencies found. Each entry:
 {{"source": "path/to/file.py", "target": "inferred.module", "type": "dynamic_import|plugin|registry|getattr", "evidence": "the code snippet"}}
 
 If none found, output an empty array: []
-Output ONLY the JSON array. Use FINAL() to return the JSON string."""
+Output ONLY the JSON array."""
 
-        result = self.rlm.completion(
-            prompt=prompt,
-            setup_code="import json\nimport re",
-        )
+        result = self.rlm.completion(prompt=prompt)
 
         self.cost_tracker.record(result, "discover_hidden_deps")
 
@@ -321,12 +337,9 @@ Output a JSON object:
   "reasoning": "brief explanation"
 }}
 
-Output ONLY the JSON. Use FINAL() to return the JSON string."""
+Output ONLY the JSON."""
 
-        result = self.rlm.completion(
-            prompt=prompt,
-            setup_code="import json",
-        )
+        result = self.rlm.completion(prompt=prompt)
 
         self.cost_tracker.record(result, "detect_patterns")
 
@@ -391,12 +404,9 @@ Provide 3-7 specific, actionable refactoring suggestions. Each should:
 - Explain why it improves the architecture
 
 Output a JSON array of strings, each a complete suggestion.
-Output ONLY the JSON array. Use FINAL() to return the JSON string."""
+Output ONLY the JSON array."""
 
-        result = self.rlm.completion(
-            prompt=prompt,
-            setup_code="import json",
-        )
+        result = self.rlm.completion(prompt=prompt)
 
         self.cost_tracker.record(result, "suggest_refactoring")
 
@@ -409,7 +419,9 @@ Output ONLY the JSON array. Use FINAL() to return the JSON string."""
 
         return []
 
-    def run_all(self, graph_metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def run_all(
+        self, graph_metrics: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Run all RLM analysis steps and return combined results.
 
         Args:

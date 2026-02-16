@@ -22,7 +22,7 @@ from rlm_codelens.codebase_graph import CodebaseGraphAnalyzer
 from rlm_codelens.repo_scanner import RepositoryScanner
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> type:
     """Lazy imports for heavier modules to avoid circular imports."""
     if name == "CostTracker":
         from rlm_codelens.utils.cost_tracker import CostTracker

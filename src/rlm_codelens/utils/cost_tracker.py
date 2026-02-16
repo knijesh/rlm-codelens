@@ -6,11 +6,12 @@ Helps stay within budget limits
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from rlm_codelens.config import BUDGET_ALERT_THRESHOLD, BUDGET_LIMIT
 
 # Cost estimates per 1M tokens
-COSTS = {
+COSTS: Dict[str, Dict[str, float]] = {
     "text-embedding-3-small": {"input": 0.02, "output": 0.0},
     "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
     "gpt-4": {"input": 30.0, "output": 60.0},
@@ -22,20 +23,26 @@ COSTS = {
 class CostTracker:
     """Tracks API costs in real-time across different services"""
 
-    def __init__(self, budget_limit=BUDGET_LIMIT, log_file=None):
+    def __init__(
+        self,
+        budget_limit: float = BUDGET_LIMIT,
+        log_file: Optional[str] = None,
+    ) -> None:
         self.budget_limit = budget_limit
         # Handle case where BUDGET_ALERT_THRESHOLD might be None
         alert_pct = BUDGET_ALERT_THRESHOLD if BUDGET_ALERT_THRESHOLD is not None else 80
         self.alert_threshold = budget_limit * (alert_pct / 100)
         self.current_cost = 0.0
-        self.cost_breakdown = {}
-        self.calls_log = []
+        self.cost_breakdown: Dict[str, Any] = {}
+        self.calls_log: List[Dict[str, Any]] = []
         self.log_file = log_file or "outputs/cost_log.json"
 
         # Ensure outputs directory exists
         Path(self.log_file).parent.mkdir(parents=True, exist_ok=True)
 
-    def add_embedding_call(self, tokens, model="text-embedding-3-small"):
+    def add_embedding_call(
+        self, tokens: int, model: str = "text-embedding-3-small"
+    ) -> float:
         """Track embedding API cost"""
         cost_per_1m = COSTS.get(model, {}).get("input", 0.02)
         cost = (tokens / 1_000_000) * cost_per_1m
@@ -43,7 +50,9 @@ class CostTracker:
         self._add_cost("embeddings", model, tokens, cost)
         return cost
 
-    def add_llm_call(self, input_tokens, output_tokens, model="gpt-3.5-turbo"):
+    def add_llm_call(
+        self, input_tokens: int, output_tokens: int, model: str = "gpt-3.5-turbo"
+    ) -> float:
         """Track LLM API cost"""
         model_costs = COSTS.get(model, {"input": 0.50, "output": 1.50})
 
@@ -65,7 +74,7 @@ class CostTracker:
         )
         return total_cost
 
-    def add_rlm_call(self, result):
+    def add_rlm_call(self, result: Any) -> float:
         """Track RLM call cost from result object"""
         if hasattr(result, "usage"):
             tokens = result.usage.total_tokens
@@ -75,7 +84,14 @@ class CostTracker:
             return self.add_llm_call(input_tokens, output_tokens)
         return 0.0
 
-    def _add_cost(self, category, model, tokens, cost, details=None):
+    def _add_cost(
+        self,
+        category: str,
+        model: str,
+        tokens: int,
+        cost: float,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Internal method to add cost entry"""
         self.current_cost += cost
 
@@ -119,7 +135,7 @@ class CostTracker:
         # Save log
         self._save_log()
 
-    def _check_budget(self):
+    def _check_budget(self) -> None:
         """Check if approaching budget limit"""
         percentage = (self.current_cost / self.budget_limit) * 100
 
@@ -134,7 +150,7 @@ class CostTracker:
             )
             self._alerted = True
 
-    def _save_log(self):
+    def _save_log(self) -> None:
         """Save cost log to file"""
         log_data = {
             "timestamp": datetime.now().isoformat(),
@@ -148,7 +164,7 @@ class CostTracker:
         with open(self.log_file, "w") as f:
             json.dump(log_data, f, indent=2)
 
-    def print_summary(self):
+    def print_summary(self) -> None:
         """Print cost summary"""
         print("\n" + "=" * 60)
         print("COST SUMMARY")
@@ -170,7 +186,7 @@ class CostTracker:
 
         print("=" * 60 + "\n")
 
-    def get_summary_dict(self):
+    def get_summary_dict(self) -> Dict[str, Any]:
         """Get cost summary as dictionary"""
         return {
             "total_cost": self.current_cost,
@@ -187,7 +203,7 @@ class BudgetExceededError(Exception):
     pass
 
 
-def format_cost(cost):
+def format_cost(cost: float) -> str:
     """Format cost for display"""
     if cost < 0.01:
         return f"${cost * 100:.2f}¢"

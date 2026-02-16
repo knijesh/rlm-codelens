@@ -52,8 +52,8 @@ class TestImportGuard:
     """Test that ImportError is handled gracefully when rlm is not installed."""
 
     def test_rlm_not_available_raises_import_error(self, simple_structure):
-        """When rlms package is not installed, ArchitectureRLMAnalyzer should raise ImportError."""
-        with patch.dict("sys.modules", {"rlms": None}):
+        """When rlm package is not installed, ArchitectureRLMAnalyzer should raise ImportError."""
+        with patch.dict("sys.modules", {"rlm": None}):
             # Force reimport
             import rlm_codelens.architecture_analyzer as mod
 

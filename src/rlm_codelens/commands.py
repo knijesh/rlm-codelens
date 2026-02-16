@@ -6,10 +6,12 @@ separated from argument parsing for better testability.
 
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
 
-def run_phase(phase_name: str, phase_func, *args, **kwargs):
+def run_phase(
+    phase_name: str, phase_func: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
     """Helper to run a phase with error handling and monitoring."""
     start_time = time.time()
 
@@ -182,7 +184,7 @@ def analyze_architecture(
             print(f"   ... and {len(analysis.anti_patterns) - 5} more")
 
     # Layer distribution
-    layer_counts = {}
+    layer_counts: Dict[str, int] = {}
     for layer in analysis.layers.values():
         layer_counts[layer] = layer_counts.get(layer, 0) + 1
     print("\n📐 Layer Distribution:")
