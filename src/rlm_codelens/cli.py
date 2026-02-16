@@ -74,6 +74,11 @@ Examples:
         action="store_true",
         help="Include full source text in scan output (needed for --deep RLM analysis)",
     )
+    scan_parser.add_argument(
+        "--name",
+        default=None,
+        help="Override the repository name used in reports and visualizations",
+    )
 
     # analyze-architecture command
     arch_parser = subparsers.add_parser(
@@ -140,6 +145,27 @@ Examples:
         help="Don't automatically open in browser",
     )
 
+    # generate-report command
+    report_parser = subparsers.add_parser(
+        "generate-report",
+        help="Generate a standalone HTML analysis report",
+        description="Produce a self-contained HTML report explaining the architecture analysis findings.",
+    )
+    report_parser.add_argument(
+        "analysis_file",
+        help="Path to architecture analysis JSON file (from analyze-architecture command)",
+    )
+    report_parser.add_argument(
+        "--output",
+        default="outputs/report.html",
+        help="Output HTML file path (default: outputs/report.html)",
+    )
+    report_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Don't automatically open in browser",
+    )
+
     return parser
 
 
@@ -168,6 +194,7 @@ def main(args: Optional[List[str]] = None) -> int:
                 output=parsed_args.output,
                 exclude=parsed_args.exclude,
                 include_source=parsed_args.include_source,
+                name=parsed_args.name,
             )
             return 0
 
@@ -189,6 +216,16 @@ def main(args: Optional[List[str]] = None) -> int:
             from rlm_codelens.commands import visualize_architecture
 
             visualize_architecture(
+                analysis_file=parsed_args.analysis_file,
+                output=parsed_args.output,
+                open_browser=not parsed_args.no_browser,
+            )
+            return 0
+
+        elif parsed_args.command == "generate-report":
+            from rlm_codelens.commands import generate_report
+
+            generate_report(
                 analysis_file=parsed_args.analysis_file,
                 output=parsed_args.output,
                 open_browser=not parsed_args.no_browser,

@@ -37,6 +37,7 @@ def scan_repository(
     output: str = "outputs/scan.json",
     exclude: Optional[list] = None,
     include_source: bool = False,
+    name: Optional[str] = None,
 ) -> None:
     """Scan a repository and extract module structure.
 
@@ -45,6 +46,7 @@ def scan_repository(
         output: Output JSON file path
         exclude: Additional directory names to exclude
         include_source: Whether to include source text
+        name: Override the repository name
     """
     from rlm_codelens.repo_scanner import RepositoryScanner
 
@@ -65,6 +67,9 @@ def scan_repository(
             include_source=include_source,
         )
         structure = scanner.scan()
+
+        if name:
+            structure.name = name
 
         # Print summary
         print("\n📊 Scan Summary:")
@@ -317,6 +322,53 @@ def visualize_architecture(
         print("💡 Make sure you've run 'analyze-architecture' first")
     except Exception as e:
         print(f"\n❌ Error during visualization: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+def generate_report(
+    analysis_file: str,
+    output: str = "outputs/report.html",
+    open_browser: bool = True,
+) -> None:
+    """Generate a standalone HTML analysis report.
+
+    Args:
+        analysis_file: Path to architecture analysis JSON
+        output: Output HTML file path
+        open_browser: Whether to open in browser
+    """
+    from rlm_codelens.report_generator import generate_analysis_report
+
+    print("\n" + "=" * 70)
+    print("📋 ANALYSIS REPORT")
+    print("=" * 70)
+    print(f"Input: {analysis_file}")
+    print(f"Output: {output}")
+    print("=" * 70 + "\n")
+
+    try:
+        output_path = generate_analysis_report(
+            analysis_file=analysis_file,
+            output_file=output,
+            open_browser=open_browser,
+        )
+
+        print(f"\n{'=' * 70}")
+        print("✅ Analysis report generated!")
+        print(f"📄 File: {output_path}")
+        if open_browser:
+            print("🌐 Opening in your default browser...")
+        else:
+            print(f"💡 Open manually: open {output_path}")
+        print("=" * 70 + "\n")
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+        print("💡 Make sure you've run 'analyze-architecture' first")
+    except Exception as e:
+        print(f"\n❌ Error during report generation: {e}")
         import traceback
 
         traceback.print_exc()

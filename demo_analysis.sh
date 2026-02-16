@@ -40,8 +40,8 @@ echo ""
 
 SCAN_FILE="$OUTPUTS_DIR/self_scan.json"
 
-echo -e "${BLUE}Running:${NC} uv run rlmc scan-repo . --output $SCAN_FILE"
-uv run rlmc scan-repo . --output "$SCAN_FILE"
+echo -e "${BLUE}Running:${NC} uv run rlmc scan-repo . --name rlm-codelens --output $SCAN_FILE"
+uv run rlmc scan-repo . --name "rlm-codelens" --output "$SCAN_FILE"
 
 echo -e "${GREEN}✓ Scan complete${NC}"
 echo ""
@@ -79,6 +79,30 @@ echo -e "${GREEN}✓ Visualization generated${NC}"
 echo ""
 
 ################################################################################
+# Phase 4: Generate Analysis Report
+################################################################################
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Phase 4: Generating Analysis Report${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+REPORT_FILE="$OUTPUTS_DIR/self_report.html"
+
+echo -e "${BLUE}Running:${NC} uv run rlmc generate-report $ARCH_FILE --output $REPORT_FILE --no-browser"
+uv run rlmc generate-report "$ARCH_FILE" --output "$REPORT_FILE" --no-browser
+
+echo -e "${GREEN}✓ Report generated${NC}"
+echo ""
+
+################################################################################
+# Cleanup: Remove intermediate JSON files
+################################################################################
+echo -e "${YELLOW}Cleaning up intermediate files...${NC}"
+rm -f "$SCAN_FILE" "$ARCH_FILE"
+echo -e "${GREEN}✓ Removed intermediate files${NC}"
+echo ""
+
+################################################################################
 # Summary
 ################################################################################
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
@@ -86,10 +110,10 @@ echo -e "${BLUE}║                    Demo Complete! ✓                       
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${GREEN}Output Files:${NC}"
-echo -e "  1. Scan:           ${BLUE}$SCAN_FILE${NC}"
-echo -e "  2. Architecture:   ${BLUE}$ARCH_FILE${NC}"
-echo -e "  3. Visualization:  ${BLUE}$VIZ_FILE${NC}"
+echo -e "  1. Visualization:  ${BLUE}$VIZ_FILE${NC}"
+echo -e "  2. Report:         ${BLUE}$REPORT_FILE${NC}"
 echo ""
-echo -e "${GREEN}Open visualization:${NC}"
+echo -e "${GREEN}Open in browser:${NC}"
 echo -e "  ${BLUE}open $VIZ_FILE${NC}"
+echo -e "  ${BLUE}open $REPORT_FILE${NC}"
 echo ""

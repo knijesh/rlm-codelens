@@ -9,12 +9,13 @@
 # 3. Generate interactive visualization
 #
 # Usage:
-#   ./run_analysis.sh <path-or-url> [output-prefix]
+#   ./run_analysis.sh <path-or-url> [output-prefix] [--deep]
 #
 # Examples:
 #   ./run_analysis.sh /path/to/local/repo
 #   ./run_analysis.sh https://github.com/encode/starlette starlette
 #   ./run_analysis.sh . self
+#   ./run_analysis.sh . self --deep        # Enable RLM deep analysis
 ################################################################################
 
 set -e  # Exit on error
@@ -30,15 +31,24 @@ NC='\033[0m' # No Color
 OUTPUTS_DIR="outputs"
 
 # Parse arguments
-if [ $# -eq 0 ]; then
+DEEP=false
+POSITIONAL=()
+for arg in "$@"; do
+    case $arg in
+        --deep) DEEP=true ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+
+if [ ${#POSITIONAL[@]} -eq 0 ]; then
     echo -e "${RED}Error: Repository path or URL required${NC}"
-    echo "Usage: $0 <path-or-url> [output-prefix]"
-    echo "Example: $0 /path/to/repo myrepo"
+    echo "Usage: $0 <path-or-url> [output-prefix] [--deep]"
+    echo "Example: $0 /path/to/repo myrepo --deep"
     exit 1
 fi
 
-REPO=$1
-PREFIX=${2:-"analysis"}
+REPO="${POSITIONAL[0]}"
+PREFIX="${POSITIONAL[1]:-analysis}"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║         RLM-Codelens Architecture Analysis Pipeline           ║${NC}"
@@ -47,6 +57,7 @@ echo ""
 echo -e "${GREEN}Repository:${NC} $REPO"
 echo -e "${GREEN}Output Prefix:${NC} $PREFIX"
 echo -e "${GREEN}Output Directory:${NC} $OUTPUTS_DIR"
+echo -e "${GREEN}Deep Analysis:${NC} $DEEP"
 echo ""
 
 # Create outputs directory if it doesn't exist
@@ -62,8 +73,15 @@ echo ""
 
 SCAN_FILE="$OUTPUTS_DIR/${PREFIX}_scan.json"
 
-echo -e "${BLUE}Running:${NC} uv run rlmc scan-repo $REPO --output $SCAN_FILE"
-uv run rlmc scan-repo "$REPO" --output "$SCAN_FILE"
+SCAN_CMD="uv run rlmc scan-repo $REPO --name $PREFIX --output $SCAN_FILE"
+SCAN_ARGS=("$REPO" --name "$PREFIX" --output "$SCAN_FILE")
+if [ "$DEEP" = true ]; then
+    SCAN_CMD="$SCAN_CMD --include-source"
+    SCAN_ARGS+=(--include-source)
+fi
+
+echo -e "${BLUE}Running:${NC} $SCAN_CMD"
+uv run rlmc scan-repo "${SCAN_ARGS[@]}"
 
 if [ ! -f "$SCAN_FILE" ]; then
     echo -e "${RED}Error: Repository scan failed${NC}"
@@ -83,8 +101,15 @@ echo ""
 
 ARCH_FILE="$OUTPUTS_DIR/${PREFIX}_arch.json"
 
-echo -e "${BLUE}Running:${NC} uv run rlmc analyze-architecture $SCAN_FILE --output $ARCH_FILE"
-uv run rlmc analyze-architecture "$SCAN_FILE" --output "$ARCH_FILE"
+ARCH_CMD="uv run rlmc analyze-architecture $SCAN_FILE --output $ARCH_FILE"
+ARCH_ARGS=("$SCAN_FILE" --output "$ARCH_FILE")
+if [ "$DEEP" = true ]; then
+    ARCH_CMD="$ARCH_CMD --deep"
+    ARCH_ARGS+=(--deep)
+fi
+
+echo -e "${BLUE}Running:${NC} $ARCH_CMD"
+uv run rlmc analyze-architecture "${ARCH_ARGS[@]}"
 
 if [ ! -f "$ARCH_FILE" ]; then
     echo -e "${RED}Error: Architecture analysis failed${NC}"
@@ -116,6 +141,35 @@ echo -e "${GREEN}✓ Visualization generated: $VIZ_FILE${NC}"
 echo ""
 
 ################################################################################
+# Phase 4: Generate Analysis Report
+################################################################################
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Phase 4: Generating Analysis Report${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+REPORT_FILE="$OUTPUTS_DIR/${PREFIX}_report.html"
+
+echo -e "${BLUE}Running:${NC} uv run rlmc generate-report $ARCH_FILE --output $REPORT_FILE --no-browser"
+uv run rlmc generate-report "$ARCH_FILE" --output "$REPORT_FILE" --no-browser
+
+if [ ! -f "$REPORT_FILE" ]; then
+    echo -e "${RED}Error: Report generation failed${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Report generated: $REPORT_FILE${NC}"
+echo ""
+
+################################################################################
+# Cleanup: Remove intermediate JSON files
+################################################################################
+echo -e "${YELLOW}Cleaning up intermediate files...${NC}"
+rm -f "$SCAN_FILE" "$ARCH_FILE"
+echo -e "${GREEN}✓ Removed intermediate files${NC}"
+echo ""
+
+################################################################################
 # Summary
 ################################################################################
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
@@ -123,11 +177,10 @@ echo -e "${BLUE}║                    Analysis Complete! ✓                   
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${GREEN}Output Files:${NC}"
-echo -e "  1. Scan:           ${BLUE}$SCAN_FILE${NC}"
-echo -e "  2. Architecture:   ${BLUE}$ARCH_FILE${NC}"
-echo -e "  3. Visualization:  ${BLUE}$VIZ_FILE${NC}"
+echo -e "  1. Visualization:  ${BLUE}$VIZ_FILE${NC}"
+echo -e "  2. Report:         ${BLUE}$REPORT_FILE${NC}"
 echo ""
 echo -e "${GREEN}Next Steps:${NC}"
 echo -e "  • Open visualization: ${BLUE}open $VIZ_FILE${NC}"
-echo -e "  • Deep RLM analysis:  ${BLUE}uv run rlmc analyze-architecture $SCAN_FILE --deep${NC}"
+echo -e "  • Open report:        ${BLUE}open $REPORT_FILE${NC}"
 echo ""
