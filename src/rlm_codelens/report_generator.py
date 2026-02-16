@@ -32,13 +32,33 @@ def _health_rating(data: Dict[str, Any]) -> tuple:
     score = max(0, 100 - penalty)
 
     if score >= 80:
-        return ("Healthy", "#4ade80", score, "The codebase has a clean architecture with few issues.")
+        return (
+            "Healthy",
+            "#4ade80",
+            score,
+            "The codebase has a clean architecture with few issues.",
+        )
     elif score >= 60:
-        return ("Fair", "#facc15", score, "Some architectural issues exist that should be addressed.")
+        return (
+            "Fair",
+            "#facc15",
+            score,
+            "Some architectural issues exist that should be addressed.",
+        )
     elif score >= 40:
-        return ("Needs Attention", "#fb923c", score, "Multiple architectural issues detected. Prioritize refactoring.")
+        return (
+            "Needs Attention",
+            "#fb923c",
+            score,
+            "Multiple architectural issues detected. Prioritize refactoring.",
+        )
     else:
-        return ("Critical", "#ef4444", score, "Significant structural problems. Immediate refactoring recommended.")
+        return (
+            "Critical",
+            "#ef4444",
+            score,
+            "Significant structural problems. Immediate refactoring recommended.",
+        )
 
 
 def _escape(text: str) -> str:
@@ -230,7 +250,9 @@ def _build_antipatterns_section(data: Dict[str, Any]) -> str:
     }
 
     severity_order = {"high": 0, "medium": 1, "low": 2}
-    patterns_sorted = sorted(patterns, key=lambda p: severity_order.get(p.get("severity", "low"), 3))
+    patterns_sorted = sorted(
+        patterns, key=lambda p: severity_order.get(p.get("severity", "low"), 3)
+    )
 
     severity_colors = {"high": "#ef4444", "medium": "#fb923c", "low": "#facc15"}
 

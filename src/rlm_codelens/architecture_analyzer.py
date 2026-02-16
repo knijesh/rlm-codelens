@@ -419,9 +419,7 @@ Output ONLY the JSON array."""
 
         return []
 
-    def run_all(
-        self, graph_metrics: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def run_all(self, graph_metrics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Run all RLM analysis steps and return combined results.
 
         Args:
