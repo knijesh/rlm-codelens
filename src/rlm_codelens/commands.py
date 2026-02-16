@@ -4,26 +4,9 @@ This module contains the actual implementation of CLI commands,
 separated from argument parsing for better testability.
 """
 
-import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-from rlm_codelens.config import (
-    BUDGET_LIMIT,
-    REPO_FULL_NAME,
-    REPO_NAME,
-    REPO_OWNER,
-    REPO_SLUG,
-    SAMPLE_SIZE,
-    USE_SAMPLE_DATA,
-    print_config,
-    set_repo,
-    validate_config,
-)
-from rlm_codelens.utils.cost_estimator import CostCalculator
-from rlm_codelens.utils.cost_tracker import CostTracker
 
 
 def run_phase(phase_name: str, phase_func, *args, **kwargs):
@@ -47,268 +30,291 @@ def run_phase(phase_name: str, phase_func, *args, **kwargs):
         raise
 
 
-def estimate_costs(num_items: int = 80000) -> bool:
-    """Run cost estimation without making API calls.
+def scan_repository(
+    repo_path: str,
+    output: str = "outputs/scan.json",
+    exclude: Optional[list] = None,
+    include_source: bool = False,
+) -> None:
+    """Scan a repository and extract module structure.
 
     Args:
-        num_items: Number of items to estimate for
-
-    Returns:
-        True if feasible, False otherwise
+        repo_path: Local path or remote git URL
+        output: Output JSON file path
+        exclude: Additional directory names to exclude
+        include_source: Whether to include source text
     """
+    from rlm_codelens.repo_scanner import RepositoryScanner
+
     print("\n" + "=" * 70)
-    print("💰 PRE-FLIGHT COST ESTIMATION")
+    print("📂 REPOSITORY SCAN")
+    print("=" * 70)
+    print(f"Repository: {repo_path}")
+    print(f"Output: {output}")
+    if exclude:
+        print(f"Extra excludes: {', '.join(exclude)}")
     print("=" * 70)
 
-    calculator = CostCalculator(budget_limit=BUDGET_LIMIT)
-
-    # Project estimate
-    repo_full_name = f"{REPO_OWNER}/{REPO_NAME}"
-    calculator.print_project_estimate(num_items=num_items, repo_name=repo_full_name)
-
-    # RLM vs Non-RLM comparison
-    calculator.print_comparison(num_items=100)
-
-    # Budget recommendation
-    rec = calculator.get_budget_recommendation(BUDGET_LIMIT, num_items)
-    print(f"\n📋 RECOMMENDATION:")
-    print(f"   {rec['message']}")
-
-    if not rec.get("feasible", True):
-        print(f"\n⛔ Analysis not recommended with current budget.")
-        print(f"   {rec['recommendation']}")
-        return False
-
-    return True
-
-
-def compare_methods(num_items: int = 100) -> None:
-    """Show RLM vs Non-RLM comparison.
-
-    Args:
-        num_items: Number of items to compare
-    """
-    calculator = CostCalculator(budget_limit=BUDGET_LIMIT)
-    calculator.print_comparison(num_items=num_items)
-
-
-def run_analysis(
-    repo: str,
-    sample: bool = False,
-    limit: Optional[int] = None,
-    budget: Optional[float] = None,
-    phase: str = "all",
-    skip_estimate: bool = False,
-) -> None:
-    """Run the complete repository analysis pipeline.
-
-    Args:
-        repo: Repository to analyze (owner/repo format)
-        sample: Whether to use sample data
-        limit: Maximum number of items to process
-        budget: Budget limit in USD
-        phase: Which phase to run (all, collect, embed, cluster, rlm, correlate, report)
-        skip_estimate: Whether to skip pre-flight cost estimation
-    """
-    # Parse repository string first so DB and table names match the repo
     try:
-        repo_owner, repo_name = repo.split("/")
-    except ValueError:
-        print(f"❌ Error: Invalid repository format '{repo}'")
-        print("   Expected format: owner/repo")
-        print("   Example: encode/starlette")
+        print("\n🔍 Scanning repository...")
+        scanner = RepositoryScanner(
+            repo_path=repo_path,
+            exclude_patterns=exclude,
+            include_source=include_source,
+        )
+        structure = scanner.scan()
+
+        # Print summary
+        print("\n📊 Scan Summary:")
+        print(f"   Repository: {structure.name}")
+        print(f"   Python files: {structure.total_files}")
+        print(f"   Total lines: {structure.total_lines:,}")
+        print(f"   Packages: {len(structure.packages)}")
+        print(f"   Entry points: {len(structure.entry_points)}")
+
+        if structure.packages:
+            print("\n📦 Packages:")
+            for pkg in structure.packages[:15]:
+                print(f"   - {pkg}")
+            if len(structure.packages) > 15:
+                print(f"   ... and {len(structure.packages) - 15} more")
+
+        if structure.entry_points:
+            print("\n🚀 Entry Points:")
+            for ep in structure.entry_points:
+                print(f"   - {ep}")
+
+        # Save
+        structure.save(output)
+
+        print(f"\n{'=' * 70}")
+        print(f"✅ Scan saved to: {output}")
+        print("=" * 70)
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+    except Exception as e:
+        print(f"\n❌ Error during scan: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+def analyze_architecture(
+    scan_file: Optional[str] = None,
+    repo_path: Optional[str] = None,
+    deep: bool = False,
+    backend: Optional[str] = None,
+    model: Optional[str] = None,
+    budget: float = 10.0,
+    output: str = "outputs/architecture.json",
+) -> None:
+    """Analyze codebase architecture from scan data.
+
+    Args:
+        scan_file: Path to scan JSON (from scan-repo)
+        repo_path: Repository path to scan inline (alternative to scan_file)
+        deep: Enable RLM-powered deep analysis
+        backend: RLM backend name
+        model: RLM model name
+        budget: RLM budget limit
+        output: Output JSON file path
+    """
+    from rlm_codelens.codebase_graph import CodebaseGraphAnalyzer
+    from rlm_codelens.config import RLM_BACKEND, RLM_MODEL
+    from rlm_codelens.repo_scanner import RepositoryScanner, RepositoryStructure
+
+    print("\n" + "=" * 70)
+    print("🏗️  ARCHITECTURE ANALYSIS")
+    print("=" * 70)
+
+    # Get the repository structure
+    if scan_file:
+        print(f"Loading scan: {scan_file}")
+        structure = RepositoryStructure.load(scan_file)
+    elif repo_path:
+        print(f"Scanning repository: {repo_path}")
+        scanner = RepositoryScanner(repo_path, include_source=deep)
+        structure = scanner.scan()
+    else:
+        print("❌ Error: Provide either a scan file or --repo path")
         return
 
-    # Set config to this repo so DATABASE_URL and table names use repo name (e.g. encode_starlette_analysis.db)
-    set_repo(repo_owner, repo_name)
+    print(
+        f"Repository: {structure.name} ({structure.total_files} files, {structure.total_lines:,} LOC)"
+    )
+    print(f"Deep analysis: {'enabled' if deep else 'disabled'}")
+    print(f"Output: {output}")
+    print("=" * 70)
 
-    # Validate configuration
-    print("\n🔧 Validating configuration...")
-    validate_config()
-    print_config()
+    # Build and analyze graph
+    print("\n📊 Building module dependency graph...")
+    graph_analyzer = CodebaseGraphAnalyzer(structure)
+    analysis = graph_analyzer.analyze()
 
-    # Use config default when budget not specified (e.g. when --budget omitted in CLI)
-    if budget is None:
-        budget = BUDGET_LIMIT
+    # Print static analysis summary
+    print("\n📈 Static Analysis Results:")
+    print(f"   Modules: {analysis.total_modules}")
+    print(f"   Import edges: {analysis.total_edges}")
+    print(f"   Circular imports: {len(analysis.cycles)}")
+    print(f"   Anti-patterns: {len(analysis.anti_patterns)}")
 
-    # Determine number of items
-    num_items = limit or (SAMPLE_SIZE if sample or USE_SAMPLE_DATA else 80000)
+    if analysis.cycles:
+        print("\n🔄 Circular Imports:")
+        for cycle in analysis.cycles[:5]:
+            names = [Path(p).stem for p in cycle]
+            print(f"   {' -> '.join(names)} -> {names[0]}")
+        if len(analysis.cycles) > 5:
+            print(f"   ... and {len(analysis.cycles) - 5} more")
 
-    # Estimate costs first
-    if not skip_estimate:
-        feasible = estimate_costs(num_items)
-        if not feasible:
-            print("\n⚠️  Continuing anyway (use --skip-estimate to bypass)")
-            response = input("Continue? (y/n): ")
-            if response.lower() != "y":
-                print("Exiting.")
-                return
+    if analysis.hub_modules:
+        print("\n🔗 Hub Modules (highest connectivity):")
+        for hub in analysis.hub_modules[:5]:
+            print(
+                f"   {hub['module']}: fan_in={hub['fan_in']}, fan_out={hub['fan_out']}, LOC={hub['loc']}"
+            )
 
-    # Initialize cost tracker with user-specified budget
-    cost_tracker = CostTracker(budget_limit=budget)
+    if analysis.anti_patterns:
+        print("\n⚠️  Anti-Patterns:")
+        for ap in analysis.anti_patterns[:5]:
+            print(f"   [{ap['severity']}] {ap['type']}: {ap['details'][:80]}")
+        if len(analysis.anti_patterns) > 5:
+            print(f"   ... and {len(analysis.anti_patterns) - 5} more")
 
-    # Track start time
-    start_time = datetime.now()
+    # Layer distribution
+    layer_counts = {}
+    for layer in analysis.layers.values():
+        layer_counts[layer] = layer_counts.get(layer, 0) + 1
+    print("\n📐 Layer Distribution:")
+    for layer, count in sorted(layer_counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"   {layer}: {count} modules")
+
+    # Deep RLM analysis
+    if deep:
+        print(f"\n{'=' * 70}")
+        print("🤖 RLM DEEP ANALYSIS")
+        print("=" * 70)
+
+        try:
+            from rlm_codelens.architecture_analyzer import ArchitectureRLMAnalyzer
+
+            rlm_backend = backend or RLM_BACKEND
+            rlm_model = model or RLM_MODEL
+
+            print(f"Backend: {rlm_backend}")
+            print(f"Model: {rlm_model}")
+            print(f"Budget: ${budget:.2f}")
+
+            rlm_analyzer = ArchitectureRLMAnalyzer(
+                structure=structure,
+                backend=rlm_backend,
+                model=rlm_model,
+                budget=budget,
+            )
+
+            graph_metrics = {
+                "cycles": analysis.cycles,
+                "hub_modules": analysis.hub_modules,
+                "anti_patterns": analysis.anti_patterns,
+                "total_modules": analysis.total_modules,
+                "total_edges": analysis.total_edges,
+            }
+
+            rlm_results = rlm_analyzer.run_all(graph_metrics=graph_metrics)
+
+            # Merge into analysis
+            analysis = graph_analyzer.enrich_with_rlm(rlm_results)
+
+            # Print RLM results
+            if rlm_results.get("semantic_clusters"):
+                print(
+                    f"\n🏷️  RLM Module Classifications: {len(rlm_results['semantic_clusters'])} modules classified"
+                )
+
+            if rlm_results.get("hidden_dependencies"):
+                print(
+                    f"\n🔍 Hidden Dependencies Found: {len(rlm_results['hidden_dependencies'])}"
+                )
+                for dep in rlm_results["hidden_dependencies"][:3]:
+                    print(
+                        f"   {dep.get('source', '?')} -> {dep.get('target', '?')} ({dep.get('type', '?')})"
+                    )
+
+            if rlm_results.get("pattern_analysis"):
+                pa = rlm_results["pattern_analysis"]
+                print(
+                    f"\n🏛️  Detected Pattern: {pa.get('detected_pattern', 'unknown')} (confidence: {pa.get('confidence', 0):.0%})"
+                )
+
+            if rlm_results.get("refactoring_suggestions"):
+                print("\n💡 Refactoring Suggestions:")
+                for suggestion in rlm_results["refactoring_suggestions"][:3]:
+                    print(f"   - {suggestion[:100]}")
+
+            cost = rlm_results.get("cost_summary", {})
+            print(
+                f"\n💰 RLM Cost: ${cost.get('total_cost', 0):.4f} / ${cost.get('budget', budget):.2f}"
+            )
+
+        except ImportError as e:
+            print(f"\n❌ RLM not available: {e}")
+            print("   Install with: pip install rlm")
+        except Exception as e:
+            print(f"\n❌ RLM analysis failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    # Save results
+    analysis.save(output)
+
+    print(f"\n{'=' * 70}")
+    print(f"✅ Architecture analysis saved to: {output}")
+    print("=" * 70)
+
+
+def visualize_architecture(
+    analysis_file: str,
+    output: str = "outputs/architecture_visualization.html",
+    open_browser: bool = True,
+) -> None:
+    """Generate interactive architecture visualization.
+
+    Args:
+        analysis_file: Path to architecture analysis JSON
+        output: Output HTML file path
+        open_browser: Whether to open in browser
+    """
+    from rlm_codelens.visualizer import generate_architecture_visualization
+
+    print("\n" + "=" * 70)
+    print("🎨 ARCHITECTURE VISUALIZATION")
+    print("=" * 70)
+    print(f"Input: {analysis_file}")
+    print(f"Output: {output}")
+    print("=" * 70 + "\n")
 
     try:
-        # Phase 1: Data Collection
-        if phase in ["all", "collect"]:
-            from rlm_codelens.data_collection import RepositoryDataCollector
+        output_path = generate_architecture_visualization(
+            analysis_file=analysis_file,
+            output_file=output,
+            open_browser=open_browser,
+        )
 
-            item_limit = limit or (SAMPLE_SIZE if sample or USE_SAMPLE_DATA else None)
+        print(f"\n{'=' * 70}")
+        print("✅ Architecture visualization generated!")
+        print(f"📄 File: {output_path}")
+        if open_browser:
+            print("🌐 Opening in your default browser...")
+        else:
+            print(f"💡 Open manually: open {output_path}")
+        print("=" * 70 + "\n")
 
-            collector = run_phase(
-                "Data Collection",
-                lambda: RepositoryDataCollector(
-                    repo_owner=repo_owner, repo_name=repo_name
-                ),
-            )
-            df = run_phase("Collecting Data", collector.collect_all, limit=item_limit)
-
-            print(f"\n📊 Collected {len(df)} items from {repo}")
-            cost_tracker.print_summary()
-
-        # Phase 2: Embeddings
-        if phase in ["all", "embed"]:
-            from rlm_codelens.embeddings import EmbeddingGenerator
-
-            generator = run_phase("Initializing Embeddings", EmbeddingGenerator)
-            df = run_phase("Generating Embeddings", generator.generate_embeddings)
-
-            # Track embedding costs
-            cost_tracker.add_embedding_call(
-                len(df) * 800,  # Estimated tokens
-                "text-embedding-3-small",
-            )
-            cost_tracker.print_summary()
-
-        # Phase 3: Clustering
-        if phase in ["all", "cluster"]:
-            from rlm_codelens.clustering import TopicClusterer
-
-            clusterer = run_phase("Initializing Clustering", TopicClusterer)
-            df, stats = run_phase("Clustering Items", clusterer.cluster)
-
-            print(f"\n📊 Created {len(stats)} clusters")
-
-        # Phase 4: RLM Analysis
-        if phase in ["all", "rlm"]:
-            print("\n" + "=" * 70)
-            print("🤖 RLM ANALYSIS")
-            print("=" * 70)
-
-            try:
-                from rlm_codelens.rlm_analysis import SecureRLMAnalyzer, AnalysisConfig
-
-                # Configure for cost efficiency
-                config = AnalysisConfig(
-                    max_clusters=50 if sample else 100,
-                    sample_size=5,
-                    parallel_workers=4,
-                    enable_caching=True,
-                    skip_if_over_budget=True,
-                    prompt_optimization=True,
-                )
-
-                analyzer = SecureRLMAnalyzer(budget_limit=budget, config=config)
-
-                # Analyze in parallel with cost control
-                cluster_analyses = analyzer.analyze_clusters_parallel()
-                correlations = analyzer.discover_correlations_safe()
-
-                print(f"\n📊 Analyzed {len(cluster_analyses)} clusters")
-                print(f"📊 Discovered {len(correlations)} correlations")
-
-            except ImportError as e:
-                print(f"⚠️  Could not import RLM analyzer: {e}")
-                print("   Please ensure rlm_analysis.py is properly configured")
-                raise
-
-            cost_tracker.print_summary()
-
-        # Phase 5: Issue Correlation
-        if phase in ["all", "correlate"]:
-            from rlm_codelens.issue_correlation import IssueCorrelationAnalyzer
-
-            analyzer = run_phase(
-                "Initializing Correlation Analysis", IssueCorrelationAnalyzer
-            )
-
-            df = run_phase("Loading Data", analyzer.load_data)
-            correlations = run_phase(
-                "Finding Correlations", analyzer.find_correlations, df
-            )
-            G = run_phase("Building Graph", analyzer.build_graph, correlations, df)
-
-            # Export for visualization
-            graph_data = run_phase(
-                "Exporting Graph", analyzer.export_for_d3, G, "outputs/issue_graph.json"
-            )
-            # Also copy to visualization directory
-            import shutil
-
-            shutil.copy("outputs/issue_graph.json", "visualization/issue_graph.json")
-
-            # Get central issues
-            central = analyzer.analyze_central_issues(G, top_n=20)
-            print(f"\n📊 Top 10 most central issues:")
-            for issue in central[:10]:
-                print(
-                    f"  #{issue['number']}: {issue['title'][:60]}... (score: {issue['composite_score']:.3f})"
-                )
-
-            # Save correlation analysis JSON
-            import json
-
-            correlation_results = {
-                "central_issues": central,
-                "total_correlations": len(correlations),
-                "correlation_breakdown": graph_data["statistics"]["correlation_types"],
-            }
-            Path("outputs").mkdir(exist_ok=True)
-            with open("outputs/correlation_analysis.json", "w") as f:
-                json.dump(correlation_results, f, indent=2)
-            print(
-                f"  📄 Saved correlation analysis to outputs/correlation_analysis.json"
-            )
-
-        # Phase 6: Report Generation
-        if phase in ["all", "report"]:
-            from rlm_codelens.report_generation import ReportGenerator
-
-            generator = run_phase("Initializing Report Generator", ReportGenerator)
-
-            report = run_phase(
-                "Generating Report", generator.generate_executive_summary
-            )
-            run_phase("Creating Visualizations", generator.generate_visualizations)
-
-            print(f"\n📄 Report generated: outputs/{REPO_SLUG}_analysis_report.md")
-
-        # Final summary
-        end_time = datetime.now()
-        duration = end_time - start_time
-
-        print("\n" + "=" * 70)
-        print("🎉 ANALYSIS COMPLETE!")
-        print("=" * 70)
-        print(f"\n⏱️  Total time: {duration}")
-        print(f"💰 Total cost: ${cost_tracker.current_cost:.2f} / ${budget:.2f}")
-        print(f"📁 Outputs directory: outputs/")
-        print("\nGenerated files:")
-        print("  - outputs/issue_graph.json (for visualization)")
-        print("  - outputs/correlation_analysis.json")
-        print(f"  - outputs/{REPO_SLUG}_analysis_report.md")
-        print("  - outputs/*.png (charts)")
-        print("  - outputs/cost_log.json (detailed cost tracking)")
-        print("\n🌐 Open visualization/issue_graph_visualization.html in your browser")
-        print("=" * 70)
-
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
-        cost_tracker.print_summary()
-        sys.exit(1)
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+        print("💡 Make sure you've run 'analyze-architecture' first")
     except Exception as e:
-        print(f"\n\n❌ Pipeline failed: {e}")
-        cost_tracker.print_summary()
-        sys.exit(1)
+        print(f"\n❌ Error during visualization: {e}")
+        import traceback
+
+        traceback.print_exc()

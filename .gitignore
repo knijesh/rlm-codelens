@@ -119,6 +119,8 @@ checkpoints/
 
 # Keep example outputs
 !outputs/.gitkeep
+!outputs/examples/
+!outputs/examples/**
 
 # Database
 *.db
@@ -156,3 +158,4 @@ temp/
 IMPLEMENTATION_SUMMARY.md
 REFACTORING_SUMMARY.md
 REQUIREMENTS.md
+claude.md

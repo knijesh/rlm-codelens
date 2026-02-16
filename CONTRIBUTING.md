@@ -70,7 +70,7 @@ uv run pytest tests/ -v
 uv run pytest tests/ --cov=rlm_codelens --cov-report=html
 
 # Run specific test file
-uv run pytest tests/unit/test_core.py -v
+uv run pytest tests/unit/test_repo_scanner.py -v
 ```
 
 ### Code Style
@@ -112,10 +112,12 @@ rlm-codelens/
 │   ├── cli.py            # CLI entry point
 │   ├── commands.py       # Command implementations
 │   ├── config.py         # Configuration
-│   └── utils/            # Utility modules
-├── tests/                # Test suite
-│   ├── unit/             # Unit tests
-│   └── integration/      # Integration tests
+│   ├── repo_scanner.py   # AST-based repository scanner
+│   ├── codebase_graph.py # Module dependency graph builder
+│   ├── visualizer.py     # D3.js visualization generator
+│   └── utils/            # Cost tracking, logging
+├── tests/
+│   └── unit/             # Unit tests
 ├── docs/                 # Documentation
 └── .github/              # GitHub templates and workflows
 ```

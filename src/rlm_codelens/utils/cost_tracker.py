@@ -6,7 +6,17 @@ Helps stay within budget limits
 import json
 from datetime import datetime
 from pathlib import Path
-from rlm_codelens.config import BUDGET_LIMIT, BUDGET_ALERT_THRESHOLD, COSTS
+
+from rlm_codelens.config import BUDGET_ALERT_THRESHOLD, BUDGET_LIMIT
+
+# Cost estimates per 1M tokens
+COSTS = {
+    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
+    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+    "gpt-4": {"input": 30.0, "output": 60.0},
+    "gpt-4-turbo": {"input": 10.0, "output": 30.0},
+    "gpt-4o": {"input": 2.50, "output": 10.0},
+}
 
 
 class CostTracker:

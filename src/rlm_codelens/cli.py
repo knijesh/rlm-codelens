@@ -3,9 +3,9 @@
 This module handles argument parsing and dispatches to command implementations.
 
 Usage:
-    rlmc estimate [--items N]
-    rlmc analyze [owner/repo] [--sample] [--limit N] [--budget N] [--phase PHASE]
-    rlmc compare [--items N]
+    rlmc scan-repo <path>
+    rlmc analyze-architecture <scan.json> [--deep]
+    rlmc visualize-arch <analysis.json>
 """
 
 import argparse
@@ -13,57 +13,30 @@ import sys
 from typing import List, Optional
 
 from rlm_codelens import __version__
-from rlm_codelens.commands import compare_methods, estimate_costs, run_analysis
-from rlm_codelens.config import REPO_OWNER, REPO_NAME
-
-
-def get_default_repo() -> Optional[str]:
-    """Get default repository from environment variables.
-
-    Returns:
-        Repository string in format owner/repo, or None if not configured.
-    """
-    if REPO_OWNER and REPO_NAME:
-        return f"{REPO_OWNER}/{REPO_NAME}"
-    return None
 
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for rlmc CLI."""
-    default_repo = get_default_repo()
-    default_repo_help = (
-        f" (default from .env: {default_repo})"
-        if default_repo
-        else " (not configured in .env)"
-    )
-
     parser = argparse.ArgumentParser(
         prog="rlmc",
-        description="RLM-Codelens: Repository analysis with Recursive Language Models",
+        description="RLM-Codelens: Codebase architecture intelligence powered by Recursive Language Models",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
+        epilog="""
 Examples:
-  # Estimate costs only (no API calls)
-  rlmc estimate --items 1000
-  
-  # Analyze using repository from .env file
-  rlmc analyze --sample --limit 20
-  
-  # Analyze a specific repository (overrides .env)
-  rlmc analyze encode/starlette --sample --limit 20
-  
-  # Run full analysis with budget control
-  rlmc analyze pytorch/pytorch --budget 20.0
-  
-  # Run specific phase only
-  rlmc analyze owner/repo --phase collect --sample
-  
-  # Compare RLM vs Non-RLM approaches
-  rlmc compare --items 100
-  
-Environment:
-  Set REPO_OWNER and REPO_NAME in .env file to configure default repository.
-  Command line argument will override .env values.{default_repo_help}
+  # Scan a local repository
+  rlmc scan-repo /path/to/repo --output scan.json
+
+  # Analyze architecture (static analysis)
+  rlmc analyze-architecture scan.json --output arch.json
+
+  # Analyze with RLM-powered deep analysis
+  rlmc analyze-architecture scan.json --deep --budget 5.0
+
+  # Generate interactive architecture visualization
+  rlmc visualize-arch arch.json
+
+  # One-step: scan + analyze
+  rlmc analyze-architecture --repo /path/to/repo
         """,
     )
 
@@ -75,71 +48,96 @@ Environment:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # estimate command
-    estimate_parser = subparsers.add_parser(
-        "estimate",
-        help="Estimate costs without making API calls",
-        description="Run pre-flight cost estimation to check if analysis is feasible with current budget.",
+    # scan-repo command
+    scan_parser = subparsers.add_parser(
+        "scan-repo",
+        help="Scan a repository and extract module structure",
+        description="Parse all Python files in a repository using AST to extract imports, classes, functions, and entry points.",
     )
-    estimate_parser.add_argument(
-        "--items",
-        type=int,
-        default=80000,
-        help="Number of items to estimate for (default: 80000)",
+    scan_parser.add_argument(
+        "repo_path",
+        help="Local path or remote git URL of the repository to scan",
+    )
+    scan_parser.add_argument(
+        "--output",
+        default="outputs/scan.json",
+        help="Output JSON file path (default: outputs/scan.json)",
+    )
+    scan_parser.add_argument(
+        "--exclude",
+        nargs="*",
+        default=[],
+        help="Additional directory names to exclude from scanning",
+    )
+    scan_parser.add_argument(
+        "--include-source",
+        action="store_true",
+        help="Include full source text in scan output (needed for --deep RLM analysis)",
     )
 
-    # analyze command
-    analyze_parser = subparsers.add_parser(
-        "analyze",
-        help="Run repository analysis",
-        description="Analyze a GitHub repository using Recursive Language Models. Uses REPO_OWNER and REPO_NAME from .env if not specified.",
+    # analyze-architecture command
+    arch_parser = subparsers.add_parser(
+        "analyze-architecture",
+        help="Analyze codebase architecture from scan data",
+        description="Build a module dependency graph and compute architecture metrics. Use --deep for RLM-powered semantic analysis.",
     )
-    analyze_parser.add_argument(
-        "repo",
+    arch_parser.add_argument(
+        "scan_file",
         nargs="?",
         default=None,
-        help=f"Repository to analyze (format: owner/repo). Defaults to {default_repo} from .env if set."
-        if default_repo
-        else "Repository to analyze (format: owner/repo). Set REPO_OWNER and REPO_NAME in .env to use as default.",
+        help="Path to scan JSON file (from scan-repo command). Required unless --repo is provided.",
     )
-    analyze_parser.add_argument(
-        "--sample",
+    arch_parser.add_argument(
+        "--repo",
+        default=None,
+        help="Repository path to scan and analyze in one step (skips separate scan-repo)",
+    )
+    arch_parser.add_argument(
+        "--deep",
         action="store_true",
-        help="Use sample data (faster, cheaper)",
+        help="Enable RLM-powered deep analysis (requires API key)",
     )
-    analyze_parser.add_argument(
-        "--limit",
-        type=int,
-        help="Limit number of items to process",
+    arch_parser.add_argument(
+        "--backend",
+        default=None,
+        help="RLM backend (default: from RLM_BACKEND env or 'openai')",
     )
-    analyze_parser.add_argument(
+    arch_parser.add_argument(
+        "--model",
+        default=None,
+        help="RLM model name (default: from RLM_MODEL env or 'gpt-4o')",
+    )
+    arch_parser.add_argument(
         "--budget",
         type=float,
-        help="Budget limit in USD",
+        default=10.0,
+        help="RLM budget limit in USD (default: 10.0)",
     )
-    analyze_parser.add_argument(
-        "--phase",
-        choices=["all", "collect", "embed", "cluster", "rlm", "correlate", "report"],
-        default="all",
-        help="Which phase to run (default: all)",
-    )
-    analyze_parser.add_argument(
-        "--skip-estimate",
-        action="store_true",
-        help="Skip pre-flight cost estimation",
+    arch_parser.add_argument(
+        "--output",
+        default="outputs/architecture.json",
+        help="Output JSON file path (default: outputs/architecture.json)",
     )
 
-    # compare command
-    compare_parser = subparsers.add_parser(
-        "compare",
-        help="Compare RLM vs Non-RLM approaches",
-        description="Show cost and performance comparison between RLM and traditional approaches.",
+    # visualize-arch command
+    viz_arch_parser = subparsers.add_parser(
+        "visualize-arch",
+        help="Visualize codebase architecture as interactive graph",
+        description="Generate an interactive D3.js visualization of the architecture analysis.",
     )
-    compare_parser.add_argument(
-        "--items",
-        type=int,
-        default=100,
-        help="Number of items to compare (default: 100)",
+    viz_arch_parser.add_argument(
+        "analysis_file",
+        help="Path to architecture analysis JSON file (from analyze-architecture command)",
+    )
+    viz_arch_parser.add_argument(
+        "--output",
+        default="outputs/architecture_visualization.html",
+        help="Output HTML file path (default: outputs/architecture_visualization.html)",
+    )
+    viz_arch_parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Don't automatically open in browser",
     )
 
     return parser
@@ -162,43 +160,39 @@ def main(args: Optional[List[str]] = None) -> int:
         return 1
 
     try:
-        if parsed_args.command == "estimate":
-            feasible = estimate_costs(num_items=parsed_args.items)
-            return 0 if feasible else 1
+        if parsed_args.command == "scan-repo":
+            from rlm_codelens.commands import scan_repository
 
-        elif parsed_args.command == "analyze":
-            # Use command line repo if provided, otherwise use .env default
-            repo = parsed_args.repo if parsed_args.repo else get_default_repo()
-
-            if not repo:
-                print("❌ Error: No repository specified.")
-                print("\nPlease either:")
-                print("  1. Provide repository as argument: rlmc analyze owner/repo")
-                print("  2. Set REPO_OWNER and REPO_NAME in .env file")
-                print("\nExample .env configuration:")
-                print("  REPO_OWNER=encode")
-                print("  REPO_NAME=starlette")
-                return 1
-
-            print(f"📦 Analyzing repository: {repo}")
-            if parsed_args.repo:
-                print("   (from command line argument)")
-            else:
-                print("   (from .env configuration)")
-            print()
-
-            run_analysis(
-                repo=repo,
-                sample=parsed_args.sample,
-                limit=parsed_args.limit,
-                budget=parsed_args.budget,
-                phase=parsed_args.phase,
-                skip_estimate=parsed_args.skip_estimate,
+            scan_repository(
+                repo_path=parsed_args.repo_path,
+                output=parsed_args.output,
+                exclude=parsed_args.exclude,
+                include_source=parsed_args.include_source,
             )
             return 0
 
-        elif parsed_args.command == "compare":
-            compare_methods(num_items=parsed_args.items)
+        elif parsed_args.command == "analyze-architecture":
+            from rlm_codelens.commands import analyze_architecture
+
+            analyze_architecture(
+                scan_file=parsed_args.scan_file,
+                repo_path=parsed_args.repo,
+                deep=parsed_args.deep,
+                backend=parsed_args.backend,
+                model=parsed_args.model,
+                budget=parsed_args.budget,
+                output=parsed_args.output,
+            )
+            return 0
+
+        elif parsed_args.command == "visualize-arch":
+            from rlm_codelens.commands import visualize_architecture
+
+            visualize_architecture(
+                analysis_file=parsed_args.analysis_file,
+                output=parsed_args.output,
+                open_browser=not parsed_args.no_browser,
+            )
             return 0
 
         else:
