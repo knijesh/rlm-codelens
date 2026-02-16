@@ -236,7 +236,11 @@ analysis.save("architecture.json")
 
 <img src="samples/RLM_Sample_2.png" width="500"/>
 
-[Interactive  architecture visualization](samples/Pytorch_interactive_viz.png)
+
+[Interactive_architecture_visualization]
+
+<img src="samples/Pytorch_interactive_viz.png)" width="500"/>
+
 
 ## Contributing
 
