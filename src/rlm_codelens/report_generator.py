@@ -7,7 +7,7 @@ the architecture analysis findings with embedded CSS (dark theme).
 import json
 import webbrowser
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 def _health_rating(data: Dict[str, Any]) -> tuple:
