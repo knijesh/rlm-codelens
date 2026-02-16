@@ -28,6 +28,8 @@ Repository  -->  AST Scanner  -->  Dependency Graph  -->  Architecture Analysis 
 
 **Static analysis** works on any codebase with zero API calls. Add `--deep` to enable **RLM-powered semantic analysis** that classifies modules, discovers hidden dependencies, and suggests refactoring.
 
+📐 **[View detailed architecture diagrams →](docs/ARCHITECTURE_DIAGRAMS.md)**
+
 ## Proven at Scale
 
 | Repository | Files | LOC | Modules | Import Edges | Cycles | Anti-Patterns |
