@@ -122,6 +122,13 @@ checkpoints/
 !outputs/examples/
 !outputs/examples/**
 
+# Keep sample artifacts (screenshots, HTML, logs)
+!samples/
+!samples/**
+
+# But do NOT track extremely large viz HTML
+samples/pytorch_viz.html
+
 # Database
 *.db
 *.sqlite
@@ -159,3 +166,4 @@ IMPLEMENTATION_SUMMARY.md
 REFACTORING_SUMMARY.md
 REQUIREMENTS.md
 claude.md
+samples/pytorch_viz.html

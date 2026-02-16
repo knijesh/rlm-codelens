@@ -36,7 +36,7 @@ Repository  -->  AST Scanner  -->  Dependency Graph  -->  Architecture Analysis 
 | **vLLM** | 2,504 | 483,000 | 2,504 | 7,412 | 127 | 89 |
 | **rlm-codelens** (self) | 22 | 3,800 | 22 | 42 | 1 | 3 |
 
-Example outputs are in [`outputs/examples/`](outputs/examples/).
+Sample output,reports, visualisation and logs are in [`samples/`](samples/).
 
 ## Quick Start
 
@@ -174,6 +174,10 @@ analysis.save("architecture.json")
 [Sample_RLM_Output_2]
 
 <img src="samples/RLM_Sample_2.png" width="500"/>
+
+[Interactive  architecture visualization (HTML)](samples/pytorch_viz.html)
+
+[Interactive Report (HTML)](samples/pytorch_report.html)
 
 ## Contributing
 
