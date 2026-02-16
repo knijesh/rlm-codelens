@@ -20,15 +20,74 @@ Understanding a large codebase is one of the hardest problems in software engine
 
 ## How It Works
 
-```
-Repository  -->  AST Scanner  -->  Dependency Graph  -->  Architecture Analysis  -->  Interactive Visualization
-  (input)        (parse every       (NetworkX graph       (anti-patterns, layers,     (D3.js force-directed
-                  Python file)       of imports)           hub modules, cycles)        graph in HTML)
+```mermaid
+flowchart TB
+    Start([User Input: Repository Path]) --> Scanner
+    
+    subgraph Phase1["Phase 1: Repository Scanning"]
+        Scanner[repo_scanner.py<br/>AST Parser] --> ScanData[(scan.json<br/>Module Structure)]
+        Scanner --> |Extracts| Imports[Imports & Dependencies]
+        Scanner --> |Extracts| Classes[Classes & Functions]
+        Scanner --> |Extracts| Metadata[LOC, Docstrings, Tests]
+    end
+    
+    ScanData --> GraphBuilder
+    
+    subgraph Phase2["Phase 2: Static Analysis"]
+        GraphBuilder[codebase_graph.py<br/>NetworkX Graph] --> Graph[(Dependency Graph)]
+        Graph --> Cycles[Cycle Detection]
+        Graph --> Hubs[Hub Module Detection]
+        Graph --> Coupling[Coupling Metrics]
+        Graph --> Layers[Layer Classification]
+        Graph --> AntiPatterns[Anti-Pattern Detection]
+    end
+    
+    Graph --> Decision{Deep Analysis?}
+    
+    Decision -->|No| StaticResults[Static Analysis Results]
+    Decision -->|Yes| RLMAnalysis
+    
+    subgraph Phase3["Phase 3: RLM Deep Analysis (Optional)"]
+        RLMAnalysis[architecture_analyzer.py<br/>RLM API] --> Classify[Module Classification]
+        RLMAnalysis --> Hidden[Hidden Dependencies]
+        RLMAnalysis --> Patterns[Pattern Detection]
+        RLMAnalysis --> Refactor[Refactoring Suggestions]
+        
+        Classify --> RLMResults[RLM Results]
+        Hidden --> RLMResults
+        Patterns --> RLMResults
+        Refactor --> RLMResults
+    end
+    
+    StaticResults --> Merge[Merge Results]
+    RLMResults --> Merge
+    
+    Merge --> ArchData[(architecture.json<br/>Complete Analysis)]
+    
+    subgraph Phase4["Phase 4: Visualization & Reporting"]
+        ArchData --> Visualizer[visualizer.py<br/>D3.js Generator]
+        ArchData --> Reporter[report_generator.py<br/>HTML Generator]
+        
+        Visualizer --> VizHTML[Interactive Graph<br/>architecture_viz.html]
+        Reporter --> ReportHTML[Analysis Report<br/>report.html]
+    end
+    
+    VizHTML --> Browser([Browser Display])
+    ReportHTML --> Browser
+    
+    style Phase1 fill:#e1f5ff
+    style Phase2 fill:#fff4e1
+    style Phase3 fill:#ffe1f5
+    style Phase4 fill:#e1ffe1
+    style Scanner fill:#4a90e2
+    style GraphBuilder fill:#f5a623
+    style RLMAnalysis fill:#bd10e0
+    style Visualizer fill:#7ed321
 ```
 
 **Static analysis** works on any codebase with zero API calls. Add `--deep` to enable **RLM-powered semantic analysis** that classifies modules, discovers hidden dependencies, and suggests refactoring.
 
-📐 **[View detailed architecture diagrams →](docs/ARCHITECTURE_DIAGRAMS.md)**
+📐 **[View more architecture diagrams →](docs/ARCHITECTURE_DIAGRAMS.md)**
 
 ## Proven at Scale
 
