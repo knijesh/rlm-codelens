@@ -305,8 +305,8 @@ class TestStripMarkdownFences:
     def test_plain_fenced(self):
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
-        text = '```\n[1, 2, 3]\n```'
-        assert _strip_markdown_fences(text) == '[1, 2, 3]'
+        text = "```\n[1, 2, 3]\n```"
+        assert _strip_markdown_fences(text) == "[1, 2, 3]"
 
     def test_fenced_with_whitespace(self):
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
@@ -317,7 +317,9 @@ class TestStripMarkdownFences:
     def test_fenced_multiline_json(self):
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
-        text = '```json\n{\n  "detected_pattern": "layered",\n  "confidence": 0.85\n}\n```'
+        text = (
+            '```json\n{\n  "detected_pattern": "layered",\n  "confidence": 0.85\n}\n```'
+        )
         result = _strip_markdown_fences(text)
         parsed = json.loads(result)
         assert parsed["detected_pattern"] == "layered"
@@ -347,8 +349,11 @@ class TestMarkdownFencedResponses:
         mod.RLM = MagicMock(return_value=mock_rlm)
         try:
             a = mod.ArchitectureRLMAnalyzer(
-                simple_structure, backend="openai", model="gpt-4o",
-                budget=10.0, verbose=False,
+                simple_structure,
+                backend="openai",
+                model="gpt-4o",
+                budget=10.0,
+                verbose=False,
             )
             a.rlm = mock_rlm
             yield a
@@ -373,7 +378,9 @@ class TestMarkdownFencedResponses:
         assert patterns["confidence"] == 0.7
 
     def test_classify_modules_with_fenced_response(self, analyzer, mock_rlm):
-        fenced_json = '```json\n{"src/main.py": "business", "src/utils.py": "util"}\n```'
+        fenced_json = (
+            '```json\n{"src/main.py": "business", "src/utils.py": "util"}\n```'
+        )
         result = MagicMock()
         result.response = fenced_json
         result.usage = MagicMock()

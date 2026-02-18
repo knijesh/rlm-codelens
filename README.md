@@ -227,19 +227,17 @@ analysis.save("architecture.json")
 ```
 # Sample Output
 
-[Sample_RLM_Output]
+### Analysis Report (with `--deep` RLM analysis)
 
 <img src="samples/RLM_sample.png" width="500"/>
 
-
-[Sample_RLM_Output_2]
-
 <img src="samples/RLM_Sample_2.png" width="500"/>
 
+> **View the full HTML report:** [kubernetes_report.html](samples/kubernetes_report.html) — download and open in your browser.
 
-[Interactive_architecture_visualization]
+### Interactive Architecture Visualization
 
-<img src="samples/Pytorch_interactive_viz.png" width="500"/>
+> **View the full interactive visualization:** [kubernetes_viz.html](samples/kubernetes_viz.html) — download and open in your browser.
 
 
 ## Contributing

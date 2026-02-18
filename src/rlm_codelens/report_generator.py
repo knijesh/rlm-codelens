@@ -386,8 +386,12 @@ def _deep_was_run(data: Dict[str, Any]) -> bool:
     """Return True if the analysis JSON contains any RLM deep analysis fields."""
     return any(
         data.get(k)
-        for k in ("pattern_analysis", "semantic_clusters",
-                   "hidden_dependencies", "refactoring_suggestions")
+        for k in (
+            "pattern_analysis",
+            "semantic_clusters",
+            "hidden_dependencies",
+            "refactoring_suggestions",
+        )
     )
 
 
@@ -455,9 +459,7 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
             "<em>Key concern: address detected anti-patterns to strengthen architecture.</em>"
         )
     else:
-        sentences.append(
-            "<em>The codebase architecture is in good shape.</em>"
-        )
+        sentences.append("<em>The codebase architecture is in good shape.</em>")
 
     paragraph = " ".join(sentences)
 
@@ -475,9 +477,11 @@ def _build_pattern_analysis_section(data: Dict[str, Any]) -> str:
     pattern_analysis = data.get("pattern_analysis")
 
     if not pattern_analysis:
-        msg = ("No architectural pattern detected in this codebase."
-               if _deep_was_run(data)
-               else "No deep pattern analysis available. Run with <code>--deep</code> to enable.")
+        msg = (
+            "No architectural pattern detected in this codebase."
+            if _deep_was_run(data)
+            else "No deep pattern analysis available. Run with <code>--deep</code> to enable."
+        )
         return f"""
     <section id="pattern">
       <h2>Architectural Pattern</h2>
@@ -540,9 +544,11 @@ def _build_rlm_insights_section(data: Dict[str, Any]) -> str:
     hidden_deps = data.get("hidden_dependencies")
 
     if not semantic_clusters and not hidden_deps:
-        msg = ("Deep analysis found no semantic classifications or hidden dependencies for this codebase."
-               if _deep_was_run(data)
-               else "No RLM insights available. Run with <code>--deep</code> to enable.")
+        msg = (
+            "Deep analysis found no semantic classifications or hidden dependencies for this codebase."
+            if _deep_was_run(data)
+            else "No RLM insights available. Run with <code>--deep</code> to enable."
+        )
         return f"""
     <section id="rlm-insights">
       <h2>RLM Insights</h2>
@@ -612,9 +618,11 @@ def _build_refactoring_section(data: Dict[str, Any]) -> str:
     suggestions = data.get("refactoring_suggestions")
 
     if not suggestions:
-        msg = ("Deep analysis found no refactoring suggestions for this codebase."
-               if _deep_was_run(data)
-               else "No refactoring suggestions available. Run with <code>--deep</code> to enable.")
+        msg = (
+            "Deep analysis found no refactoring suggestions for this codebase."
+            if _deep_was_run(data)
+            else "No refactoring suggestions available. Run with <code>--deep</code> to enable."
+        )
         return f"""
     <section id="refactoring">
       <h2>Refactoring Recommendations</h2>
