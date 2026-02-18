@@ -71,6 +71,49 @@ def _escape(text: str) -> str:
     )
 
 
+def _md_to_html(text: str) -> str:
+    """Convert basic Markdown to HTML for LLM-generated content."""
+    import re
+
+    # Escape HTML entities first
+    text = _escape(text)
+
+    # Code blocks (```...```) → <pre><code>
+    text = re.sub(
+        r"```\w*\n(.*?)```",
+        r"<pre><code>\1</code></pre>",
+        text,
+        flags=re.DOTALL,
+    )
+
+    # Inline code `...` → <code>
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+
+    # Headers ### → <strong> (keep it subtle inside cards)
+    text = re.sub(r"^#{1,4}\s+(.+)$", r"<strong>\1</strong>", text, flags=re.MULTILINE)
+
+    # Bold **...**
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+
+    # Convert markdown list items (- or numbered) to HTML list items
+    # First handle unordered lists
+    text = re.sub(r"^\s*[-*]\s+(.+)$", r"<li>\1</li>", text, flags=re.MULTILINE)
+    # Wrap consecutive <li> blocks (from unordered) in <ul>
+    text = re.sub(
+        r"((?:<li>.*?</li>\n?)+)",
+        r"<ul>\1</ul>",
+        text,
+    )
+    # Avoid nested <ul> inside existing <ol>/<ul> — keep it simple
+
+    # Paragraphs: double newlines → <br><br>
+    text = re.sub(r"\n{2,}", "<br><br>", text)
+    # Single newlines within text → <br>
+    text = re.sub(r"\n", "<br>", text)
+
+    return text.strip()
+
+
 def _module_short(path: str) -> str:
     """Shorten a module path for display."""
     return Path(path).stem
@@ -339,6 +382,263 @@ def _build_layers_section(data: Dict[str, Any]) -> str:
     </section>"""
 
 
+def _deep_was_run(data: Dict[str, Any]) -> bool:
+    """Return True if the analysis JSON contains any RLM deep analysis fields."""
+    return any(
+        data.get(k)
+        for k in ("pattern_analysis", "semantic_clusters",
+                   "hidden_dependencies", "refactoring_suggestions")
+    )
+
+
+def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str:
+    """Build an executive summary paragraph synthesizing key findings."""
+    label, color, score, _ = health
+
+    total_modules = data.get("total_modules", 0)
+    total_edges = data.get("total_edges", 0)
+    total_loc = sum(
+        n.get("loc", 0) for n in data.get("graph_data", {}).get("nodes", [])
+    )
+    num_cycles = len(data.get("cycles", []))
+    num_antipatterns = len(data.get("anti_patterns", []))
+
+    sentences = [
+        f"This repository contains <strong>{total_modules}</strong> modules "
+        f"({total_loc:,} lines of code) with <strong>{total_edges}</strong> import edges."
+    ]
+
+    sentences.append(
+        f'The overall health score is <span style="color:{color}">'
+        f"<strong>{score}/100 ({label})</strong></span>."
+    )
+
+    if num_cycles:
+        sentences.append(
+            f'<span style="color:#fb923c"><strong>{num_cycles}</strong> circular '
+            f'dependency chain{"s" if num_cycles != 1 else ""}</span> detected.'
+        )
+    else:
+        sentences.append("No circular dependencies were found.")
+
+    if num_antipatterns:
+        sentences.append(
+            f"<strong>{num_antipatterns}</strong> anti-pattern"
+            f'{"s" if num_antipatterns != 1 else ""} identified.'
+        )
+
+    # RLM deep analysis extras
+    pattern_analysis = data.get("pattern_analysis")
+    refactoring = data.get("refactoring_suggestions")
+
+    if pattern_analysis:
+        pname = _escape(pattern_analysis.get("detected_pattern", "Unknown"))
+        conf = pattern_analysis.get("confidence", 0)
+        sentences.append(
+            f"RLM deep analysis detected a <strong>{pname}</strong> architectural "
+            f"pattern with {conf:.0%} confidence."
+        )
+
+    if refactoring:
+        sentences.append(
+            f"<strong>{len(refactoring)}</strong> refactoring suggestion"
+            f'{"s" if len(refactoring) != 1 else ""} available.'
+        )
+
+    # Top concern
+    if num_cycles:
+        sentences.append(
+            "<em>Key concern: resolve circular dependencies to improve modularity.</em>"
+        )
+    elif num_antipatterns:
+        sentences.append(
+            "<em>Key concern: address detected anti-patterns to strengthen architecture.</em>"
+        )
+    else:
+        sentences.append(
+            "<em>The codebase architecture is in good shape.</em>"
+        )
+
+    paragraph = " ".join(sentences)
+
+    return f"""
+    <section id="executive-summary">
+      <h2>Executive Summary</h2>
+      <div class="card executive-summary">
+        <p>{paragraph}</p>
+      </div>
+    </section>"""
+
+
+def _build_pattern_analysis_section(data: Dict[str, Any]) -> str:
+    """Build the architectural pattern analysis section from RLM deep data."""
+    pattern_analysis = data.get("pattern_analysis")
+
+    if not pattern_analysis:
+        msg = ("No architectural pattern detected in this codebase."
+               if _deep_was_run(data)
+               else "No deep pattern analysis available. Run with <code>--deep</code> to enable.")
+        return f"""
+    <section id="pattern">
+      <h2>Architectural Pattern</h2>
+      <div class="card">
+        <p style="color:#94a3b8">{msg}</p>
+      </div>
+    </section>"""
+
+    pname = _escape(pattern_analysis.get("detected_pattern", "Unknown"))
+    confidence = pattern_analysis.get("confidence", 0)
+    conf_pct = confidence * 100
+    anti_patterns = pattern_analysis.get("anti_patterns", [])
+    reasoning = _escape(pattern_analysis.get("reasoning", ""))
+
+    # Confidence bar color
+    if conf_pct >= 70:
+        bar_color = "#4ade80"
+    elif conf_pct >= 40:
+        bar_color = "#facc15"
+    else:
+        bar_color = "#fb923c"
+
+    ap_list = ""
+    if anti_patterns:
+        items = "".join(f"<li>{_escape(str(ap))}</li>" for ap in anti_patterns)
+        ap_list = f"""
+        <div style="margin-top:12px">
+          <strong style="color:#f1f5f9">Anti-Patterns Detected:</strong>
+          <ul style="padding-left:20px;margin-top:6px;color:#cbd5e1">{items}</ul>
+        </div>"""
+
+    reasoning_html = ""
+    if reasoning:
+        reasoning_html = f"""
+        <div style="margin-top:12px">
+          <strong style="color:#f1f5f9">Reasoning:</strong>
+          <p style="color:#cbd5e1;margin-top:4px">{reasoning}</p>
+        </div>"""
+
+    return f"""
+    <section id="pattern">
+      <h2>Architectural Pattern</h2>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <span class="insight-badge">{pname}</span>
+          <span style="color:#94a3b8">Confidence: {conf_pct:.0f}%</span>
+        </div>
+        <div class="bar-bg">
+          <div class="bar-fill" style="width:{conf_pct}%;background:{bar_color}"></div>
+        </div>
+        {ap_list}
+        {reasoning_html}
+      </div>
+    </section>"""
+
+
+def _build_rlm_insights_section(data: Dict[str, Any]) -> str:
+    """Build the RLM insights section with semantic classifications and hidden dependencies."""
+    semantic_clusters = data.get("semantic_clusters")
+    hidden_deps = data.get("hidden_dependencies")
+
+    if not semantic_clusters and not hidden_deps:
+        msg = ("Deep analysis found no semantic classifications or hidden dependencies for this codebase."
+               if _deep_was_run(data)
+               else "No RLM insights available. Run with <code>--deep</code> to enable.")
+        return f"""
+    <section id="rlm-insights">
+      <h2>RLM Insights</h2>
+      <div class="card">
+        <p style="color:#94a3b8">{msg}</p>
+      </div>
+    </section>"""
+
+    parts = ""
+
+    # Semantic Classifications sub-card
+    if semantic_clusters:
+        static_layers = data.get("layers", {})
+        rows = ""
+        for module_path, rlm_layer in sorted(semantic_clusters.items()):
+            mod_name = _escape(_module_short(module_path))
+            rlm_layer_esc = _escape(str(rlm_layer))
+            static_layer = static_layers.get(module_path, "")
+            diff = ""
+            if static_layer and static_layer != rlm_layer:
+                diff = f' <span style="color:#fb923c" title="Static analysis assigned: {_escape(static_layer)}">(static: {_escape(static_layer)})</span>'
+            rows += f"<tr><td>{mod_name}</td><td>{rlm_layer_esc}{diff}</td></tr>"
+
+        parts += f"""
+        <div class="card" style="margin-bottom:16px">
+          <h3 style="color:#f1f5f9;font-size:1em;margin-bottom:8px">Semantic Classifications</h3>
+          <p style="color:#94a3b8;font-size:0.85em;margin-bottom:8px">
+            RLM-assigned layer for each module based on semantic analysis of code content.
+          </p>
+          <table>
+            <thead><tr><th>Module</th><th>RLM Layer</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>"""
+
+    # Hidden Dependencies sub-card
+    if hidden_deps:
+        rows = ""
+        for dep in hidden_deps:
+            src = _escape(str(dep.get("source", "")))
+            tgt = _escape(str(dep.get("target", "")))
+            dep_type = _escape(str(dep.get("type", "")))
+            evidence = _escape(str(dep.get("evidence", "")))
+            rows += f"<tr><td>{src}</td><td>{tgt}</td><td>{dep_type}</td><td>{evidence}</td></tr>"
+
+        parts += f"""
+        <div class="card">
+          <h3 style="color:#f1f5f9;font-size:1em;margin-bottom:8px">Hidden Dependencies</h3>
+          <p style="color:#94a3b8;font-size:0.85em;margin-bottom:8px">
+            Dependencies detected through semantic analysis that are not visible in import statements.
+          </p>
+          <table>
+            <thead><tr><th>Source</th><th>Target</th><th>Type</th><th>Evidence</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>"""
+
+    return f"""
+    <section id="rlm-insights">
+      <h2>RLM Insights</h2>
+      {parts}
+    </section>"""
+
+
+def _build_refactoring_section(data: Dict[str, Any]) -> str:
+    """Build the refactoring suggestions section from RLM deep data."""
+    suggestions = data.get("refactoring_suggestions")
+
+    if not suggestions:
+        msg = ("Deep analysis found no refactoring suggestions for this codebase."
+               if _deep_was_run(data)
+               else "No refactoring suggestions available. Run with <code>--deep</code> to enable.")
+        return f"""
+    <section id="refactoring">
+      <h2>Refactoring Recommendations</h2>
+      <div class="card">
+        <p style="color:#94a3b8">{msg}</p>
+      </div>
+    </section>"""
+
+    items = ""
+    for i, suggestion in enumerate(suggestions, 1):
+        items += f'<div class="refactoring-item"><div class="refactoring-number">{i}</div><div class="refactoring-content">{_md_to_html(str(suggestion))}</div></div>\n'
+
+    return f"""
+    <section id="refactoring">
+      <h2>Refactoring Recommendations</h2>
+      <div class="card">
+        <p style="color:#94a3b8;margin-bottom:12px">
+          {len(suggestions)} suggestion{"s" if len(suggestions) != 1 else ""} from RLM deep analysis:
+        </p>
+        {items}
+      </div>
+    </section>"""
+
+
 def _build_guidance_section() -> str:
     return """
     <section id="guidance">
@@ -413,6 +713,34 @@ _CSS = """
     .guidance-list { padding-left: 20px; }
     .guidance-list li { margin-bottom: 12px; color: #cbd5e1; }
     .guidance-list strong { color: #f1f5f9; }
+    .executive-summary p { font-size: 1em; line-height: 1.7; color: #cbd5e1; }
+    .insight-badge {
+      display: inline-block; padding: 4px 14px; border-radius: 12px;
+      background: #3b82f6; color: #fff; font-weight: 600; font-size: 0.95em;
+    }
+    .refactoring-item {
+      display: flex; gap: 14px; margin-bottom: 20px; padding-bottom: 20px;
+      border-bottom: 1px solid #334155;
+    }
+    .refactoring-item:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+    .refactoring-number {
+      flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+      background: #334155; color: #60a5fa; font-weight: 700; font-size: 0.85em;
+      display: flex; align-items: center; justify-content: center; margin-top: 2px;
+    }
+    .refactoring-content { flex: 1; color: #cbd5e1; font-size: 0.9em; line-height: 1.6; }
+    .refactoring-content strong { color: #f1f5f9; }
+    .refactoring-content code {
+      background: #334155; padding: 1px 5px; border-radius: 3px;
+      font-size: 0.9em; color: #e2e8f0;
+    }
+    .refactoring-content pre {
+      background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+      padding: 12px; margin: 8px 0; overflow-x: auto;
+    }
+    .refactoring-content pre code { background: none; padding: 0; }
+    .refactoring-content ul { padding-left: 18px; margin: 6px 0; }
+    .refactoring-content li { margin-bottom: 4px; }
     p { margin-bottom: 8px; }
     nav { margin-bottom: 32px; }
     nav a {
@@ -450,23 +778,31 @@ def generate_analysis_report(
 
     nav = """
     <nav>
+      <a href="#executive-summary">Executive Summary</a>
       <a href="#summary">Summary</a>
       <a href="#health">Health</a>
+      <a href="#pattern">Pattern</a>
+      <a href="#rlm-insights">RLM Insights</a>
       <a href="#fan-metrics">Fan-In/Out</a>
       <a href="#hubs">Hubs</a>
       <a href="#cycles">Cycles</a>
       <a href="#antipatterns">Anti-Patterns</a>
+      <a href="#refactoring">Refactoring</a>
       <a href="#layers">Layers</a>
       <a href="#guidance">Guidance</a>
     </nav>"""
 
     body = (
-        _build_summary_section(data, health)
+        _build_executive_summary_section(data, health)
+        + _build_summary_section(data, health)
         + _build_health_section(health)
+        + _build_pattern_analysis_section(data)
+        + _build_rlm_insights_section(data)
         + _build_fanin_fanout_section()
         + _build_hub_modules_section(data)
         + _build_cycles_section(data)
         + _build_antipatterns_section(data)
+        + _build_refactoring_section(data)
         + _build_layers_section(data)
         + _build_guidance_section()
     )

@@ -14,6 +14,7 @@ Example:
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -101,6 +102,23 @@ class RLMCostTracker:
 
 class BudgetExceededError(Exception):
     """Raised when the RLM cost budget has been exceeded."""
+
+
+_MARKDOWN_FENCE_RE = re.compile(
+    r"^\s*```(?:json|python|text)?\s*\n(.*?)\n\s*```\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Strip markdown code fences from an RLM response before JSON parsing.
+
+    Handles responses wrapped in ```json ... ``` or plain ``` ... ```.
+    """
+    match = _MARKDOWN_FENCE_RE.search(text)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 class ArchitectureRLMAnalyzer:
@@ -214,7 +232,7 @@ Output ONLY the JSON object, no other text."""
 
         # Parse response
         try:
-            classifications = json.loads(result.response)
+            classifications = json.loads(_strip_markdown_fences(result.response))
             if isinstance(classifications, dict):
                 return classifications
         except (json.JSONDecodeError, TypeError):
@@ -283,7 +301,7 @@ Output ONLY the JSON array."""
         self.cost_tracker.record(result, "discover_hidden_deps")
 
         try:
-            deps = json.loads(result.response)
+            deps = json.loads(_strip_markdown_fences(result.response))
             if isinstance(deps, list):
                 return deps
         except (json.JSONDecodeError, TypeError):
@@ -344,7 +362,7 @@ Output ONLY the JSON."""
         self.cost_tracker.record(result, "detect_patterns")
 
         try:
-            patterns = json.loads(result.response)
+            patterns = json.loads(_strip_markdown_fences(result.response))
             if isinstance(patterns, dict):
                 return patterns
         except (json.JSONDecodeError, TypeError):
@@ -411,7 +429,7 @@ Output ONLY the JSON array."""
         self.cost_tracker.record(result, "suggest_refactoring")
 
         try:
-            suggestions = json.loads(result.response)
+            suggestions = json.loads(_strip_markdown_fences(result.response))
             if isinstance(suggestions, list):
                 return [str(s) for s in suggestions]
         except (json.JSONDecodeError, TypeError):

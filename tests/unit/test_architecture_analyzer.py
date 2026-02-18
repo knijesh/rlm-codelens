@@ -285,3 +285,123 @@ class TestArchitectureRLMAnalyzerMocked:
         results = analyzer.run_all()
         # Should still have results (run_all catches BudgetExceededError)
         assert "cost_summary" in results
+
+
+class TestStripMarkdownFences:
+    """Test _strip_markdown_fences helper for robust RLM response parsing."""
+
+    def test_plain_json(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        text = '{"key": "value"}'
+        assert _strip_markdown_fences(text) == '{"key": "value"}'
+
+    def test_json_fenced(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        text = '```json\n{"key": "value"}\n```'
+        assert _strip_markdown_fences(text) == '{"key": "value"}'
+
+    def test_plain_fenced(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        text = '```\n[1, 2, 3]\n```'
+        assert _strip_markdown_fences(text) == '[1, 2, 3]'
+
+    def test_fenced_with_whitespace(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        text = '  ```json\n  {"a": 1}\n  ```  '
+        assert _strip_markdown_fences(text) == '{"a": 1}'
+
+    def test_fenced_multiline_json(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        text = '```json\n{\n  "detected_pattern": "layered",\n  "confidence": 0.85\n}\n```'
+        result = _strip_markdown_fences(text)
+        parsed = json.loads(result)
+        assert parsed["detected_pattern"] == "layered"
+        assert parsed["confidence"] == 0.85
+
+    def test_empty_string(self):
+        from rlm_codelens.architecture_analyzer import _strip_markdown_fences
+
+        assert _strip_markdown_fences("") == ""
+        assert _strip_markdown_fences("  ") == ""
+
+
+class TestMarkdownFencedResponses:
+    """Test that analyzer methods handle markdown-fenced RLM responses."""
+
+    @pytest.fixture
+    def mock_rlm(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def analyzer(self, simple_structure, mock_rlm):
+        import rlm_codelens.architecture_analyzer as mod
+
+        original_available = mod.RLM_AVAILABLE
+        original_rlm = getattr(mod, "RLM", None)
+        mod.RLM_AVAILABLE = True
+        mod.RLM = MagicMock(return_value=mock_rlm)
+        try:
+            a = mod.ArchitectureRLMAnalyzer(
+                simple_structure, backend="openai", model="gpt-4o",
+                budget=10.0, verbose=False,
+            )
+            a.rlm = mock_rlm
+            yield a
+        finally:
+            mod.RLM_AVAILABLE = original_available
+            if original_rlm is not None:
+                mod.RLM = original_rlm
+            elif hasattr(mod, "RLM"):
+                delattr(mod, "RLM")
+
+    def test_detect_patterns_with_fenced_response(self, analyzer, mock_rlm):
+        """RLM returns markdown-fenced JSON — should still parse correctly."""
+        fenced_json = '```json\n{"detected_pattern": "modular monolith", "confidence": 0.7, "anti_patterns": ["god modules"], "reasoning": "test"}\n```'
+        result = MagicMock()
+        result.response = fenced_json
+        result.usage = MagicMock()
+        result.usage.total_cost = 0.01
+        mock_rlm.completion.return_value = result
+
+        patterns = analyzer.detect_patterns()
+        assert patterns["detected_pattern"] == "modular monolith"
+        assert patterns["confidence"] == 0.7
+
+    def test_classify_modules_with_fenced_response(self, analyzer, mock_rlm):
+        fenced_json = '```json\n{"src/main.py": "business", "src/utils.py": "util"}\n```'
+        result = MagicMock()
+        result.response = fenced_json
+        result.usage = MagicMock()
+        result.usage.total_cost = 0.01
+        mock_rlm.completion.return_value = result
+
+        classifications = analyzer.classify_modules()
+        assert classifications == {"src/main.py": "business", "src/utils.py": "util"}
+
+    def test_suggest_refactoring_with_fenced_response(self, analyzer, mock_rlm):
+        fenced_json = '```json\n["Suggestion 1", "Suggestion 2"]\n```'
+        result = MagicMock()
+        result.response = fenced_json
+        result.usage = MagicMock()
+        result.usage.total_cost = 0.01
+        mock_rlm.completion.return_value = result
+
+        suggestions = analyzer.suggest_refactoring()
+        assert suggestions == ["Suggestion 1", "Suggestion 2"]
+
+    def test_discover_hidden_deps_with_fenced_response(self, analyzer, mock_rlm):
+        fenced_json = '```json\n[{"source": "src/main.py", "target": "plugin", "type": "dynamic_import", "evidence": "importlib"}]\n```'
+        result = MagicMock()
+        result.response = fenced_json
+        result.usage = MagicMock()
+        result.usage.total_cost = 0.01
+        mock_rlm.completion.return_value = result
+
+        deps = analyzer.discover_hidden_deps()
+        assert len(deps) == 1
+        assert deps[0]["type"] == "dynamic_import"
