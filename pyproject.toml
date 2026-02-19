@@ -28,7 +28,6 @@ rlm = [
     "rlms @ git+https://github.com/alexzhang13/rlm.git",
 ]
 dev = [
-    "black>=23.0.0",
     "flake8>=6.0.0",
     "mypy>=1.5.0",
     "pre-commit>=3.4.0",
@@ -88,19 +87,6 @@ exclude_lines = [
     "if TYPE_CHECKING",
 ]
 
-[tool.black]
-line-length = 88
-target-version = ['py311']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
 [tool.ruff]
 line-length = 88
 target-version = "py311"
@@ -114,7 +100,7 @@ select = [
     "W",   # pycodestyle warnings
 ]
 ignore = [
-    "E501",  # line too long (handled by black)
+    "E501",  # line too long (handled by ruff format)
 ]
 
 [tool.mypy]
