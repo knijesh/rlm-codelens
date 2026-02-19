@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 from rlm_codelens.repo_scanner import RepositoryStructure
 
 try:
-    from rlm import RLM  # type: ignore
+    from rlm import RLM
 
     RLM_AVAILABLE = True
 except ImportError:

@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-import networkx as nx  # type: ignore[import-untyped]
+import networkx as nx
 
 from rlm_codelens.repo_scanner import RepositoryStructure
 

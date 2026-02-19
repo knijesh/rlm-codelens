@@ -90,7 +90,7 @@ def _select_ollama_model(
             print()
             return None
         if choice.isdigit() and 1 <= int(choice) <= len(models):
-            selected = models[int(choice) - 1]["name"]
+            selected = str(models[int(choice) - 1]["name"])
             print(f"  → Selected: {selected}")
             return selected
         # Also accept a model name typed directly
