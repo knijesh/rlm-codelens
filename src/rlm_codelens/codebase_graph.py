@@ -163,7 +163,7 @@ class CodebaseGraphAnalyzer:
 
     def __init__(self, structure: RepositoryStructure):
         self.structure = structure
-        self.graph = nx.DiGraph()
+        self.graph: nx.DiGraph = nx.DiGraph()
         self._internal_packages: Set[str] = set()
         self._build_graph()
 
