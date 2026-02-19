@@ -47,9 +47,18 @@ class TestSelfScanAnalyzeReport:
 
             # Verify all section IDs present
             expected_sections = [
-                "executive-summary", "summary", "health", "pattern",
-                "rlm-insights", "fan-metrics", "hubs", "cycles",
-                "antipatterns", "refactoring", "layers", "guidance",
+                "executive-summary",
+                "summary",
+                "health",
+                "pattern",
+                "rlm-insights",
+                "fan-metrics",
+                "hubs",
+                "cycles",
+                "antipatterns",
+                "refactoring",
+                "layers",
+                "guidance",
             ]
             for sid in expected_sections:
                 assert f'id="{sid}"' in html, f"Missing section: {sid}"

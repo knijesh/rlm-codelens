@@ -420,7 +420,7 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
     if num_cycles:
         sentences.append(
             f'<span style="color:#fb923c"><strong>{num_cycles}</strong> circular '
-            f'dependency chain{"s" if num_cycles != 1 else ""}</span> detected.'
+            f"dependency chain{'s' if num_cycles != 1 else ''}</span> detected."
         )
     else:
         sentences.append("No circular dependencies were found.")
@@ -428,7 +428,7 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
     if num_antipatterns:
         sentences.append(
             f"<strong>{num_antipatterns}</strong> anti-pattern"
-            f'{"s" if num_antipatterns != 1 else ""} identified.'
+            f"{'s' if num_antipatterns != 1 else ''} identified."
         )
 
     # RLM deep analysis extras
@@ -446,7 +446,7 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
     if refactoring:
         sentences.append(
             f"<strong>{len(refactoring)}</strong> refactoring suggestion"
-            f'{"s" if len(refactoring) != 1 else ""} available.'
+            f"{'s' if len(refactoring) != 1 else ''} available."
         )
 
     # Top concern
