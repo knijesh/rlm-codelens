@@ -9,5 +9,4 @@ repos:
     rev: v1.14.1
     hooks:
       - id: mypy
-        args: [--ignore-missing-imports]
-        additional_dependencies: [click, httpx]
+        additional_dependencies: [click, httpx, types-networkx]
