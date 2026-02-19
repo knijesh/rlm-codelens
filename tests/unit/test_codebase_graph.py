@@ -300,19 +300,20 @@ class TestAntiPatternDetection:
     def test_detect_anti_patterns_god_module(self):
         """A module with LOC > 500 and fan_out > 10 should be detected as god_module."""
         # god.py imports 12 other modules
-        modules = {"god.py": ModuleInfo(
-            path="god.py",
-            package="god",
-            imports=[],
-            from_imports=[
-                {"module": f"mod{i}", "names": ["x"], "level": 0}
-                for i in range(12)
-            ],
-            classes=[],
-            functions=[],
-            lines_of_code=600,
-            is_test=False,
-        )}
+        modules = {
+            "god.py": ModuleInfo(
+                path="god.py",
+                package="god",
+                imports=[],
+                from_imports=[
+                    {"module": f"mod{i}", "names": ["x"], "level": 0} for i in range(12)
+                ],
+                classes=[],
+                functions=[],
+                lines_of_code=600,
+                is_test=False,
+            )
+        }
         # Add the 12 target modules
         for i in range(12):
             modules[f"mod{i}.py"] = ModuleInfo(
@@ -350,9 +351,7 @@ class TestAntiPatternDetection:
                 path="src/models.py",
                 package="src.models",
                 imports=[],
-                from_imports=[
-                    {"module": "src.api", "names": ["handler"], "level": 0}
-                ],
+                from_imports=[{"module": "src.api", "names": ["handler"], "level": 0}],
                 classes=[],
                 functions=[],
                 lines_of_code=30,

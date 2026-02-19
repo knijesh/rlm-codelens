@@ -26,7 +26,13 @@ def static_data():
         "total_edges": 4,
         "cycles": [],
         "hub_modules": [
-            {"module": "src/service.py", "fan_in": 2, "fan_out": 2, "total": 4, "loc": 100}
+            {
+                "module": "src/service.py",
+                "fan_in": 2,
+                "fan_out": 2,
+                "total": 4,
+                "loc": 100,
+            }
         ],
         "coupling_metrics": [],
         "layers": {"src/service.py": "business", "src/api.py": "api"},
@@ -36,7 +42,9 @@ def static_data():
                 {"id": "src/service.py", "loc": 100, "layer": "business"},
                 {"id": "src/api.py", "loc": 50, "layer": "api"},
             ],
-            "links": [{"source": "src/api.py", "target": "src/service.py", "type": "import"}],
+            "links": [
+                {"source": "src/api.py", "target": "src/service.py", "type": "import"}
+            ],
         },
     }
 
@@ -150,9 +158,18 @@ class TestFullReport:
             html = Path(out_path).read_text()
 
             nav_links = [
-                "#executive-summary", "#summary", "#health", "#pattern",
-                "#rlm-insights", "#fan-metrics", "#hubs", "#cycles",
-                "#antipatterns", "#refactoring", "#layers", "#guidance",
+                "#executive-summary",
+                "#summary",
+                "#health",
+                "#pattern",
+                "#rlm-insights",
+                "#fan-metrics",
+                "#hubs",
+                "#cycles",
+                "#antipatterns",
+                "#refactoring",
+                "#layers",
+                "#guidance",
             ]
             for link in nav_links:
                 assert f'href="{link}"' in html, f"Missing nav link: {link}"
@@ -173,9 +190,18 @@ class TestFullReport:
             html = Path(out_path).read_text()
 
             section_ids = [
-                "executive-summary", "summary", "health", "pattern",
-                "rlm-insights", "fan-metrics", "hubs", "cycles",
-                "antipatterns", "refactoring", "layers", "guidance",
+                "executive-summary",
+                "summary",
+                "health",
+                "pattern",
+                "rlm-insights",
+                "fan-metrics",
+                "hubs",
+                "cycles",
+                "antipatterns",
+                "refactoring",
+                "layers",
+                "guidance",
             ]
             for sid in section_ids:
                 assert f'id="{sid}"' in html, f"Missing section: {sid}"

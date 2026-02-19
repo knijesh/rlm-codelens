@@ -466,7 +466,12 @@ class TestRLMOutputValidation:
         """Items missing required keys (source, target, type, evidence) should be dropped."""
         mock_rlm.completion.return_value = self._make_result(
             [
-                {"source": "a.py", "target": "b.py", "type": "dynamic_import", "evidence": "importlib"},
+                {
+                    "source": "a.py",
+                    "target": "b.py",
+                    "type": "dynamic_import",
+                    "evidence": "importlib",
+                },
                 {"source": "a.py", "target": "c.py"},  # missing type and evidence
                 {"source": "d.py"},  # missing most keys
             ]
@@ -479,8 +484,18 @@ class TestRLMOutputValidation:
         """Self-referencing deps (source == target) should be dropped."""
         mock_rlm.completion.return_value = self._make_result(
             [
-                {"source": "a.py", "target": "a.py", "type": "dynamic_import", "evidence": "self"},
-                {"source": "a.py", "target": "b.py", "type": "dynamic_import", "evidence": "importlib"},
+                {
+                    "source": "a.py",
+                    "target": "a.py",
+                    "type": "dynamic_import",
+                    "evidence": "self",
+                },
+                {
+                    "source": "a.py",
+                    "target": "b.py",
+                    "type": "dynamic_import",
+                    "evidence": "importlib",
+                },
             ]
         )
         deps = analyzer.discover_hidden_deps()
@@ -502,7 +517,12 @@ class TestRLMOutputValidation:
     def test_detect_patterns_clamps_confidence(self, analyzer, mock_rlm):
         """Confidence should be clamped to [0.0, 1.0]."""
         mock_rlm.completion.return_value = self._make_result(
-            {"detected_pattern": "layered", "confidence": 1.5, "anti_patterns": [], "reasoning": "test"}
+            {
+                "detected_pattern": "layered",
+                "confidence": 1.5,
+                "anti_patterns": [],
+                "reasoning": "test",
+            }
         )
         patterns = analyzer.detect_patterns()
         assert patterns["confidence"] == 1.0
@@ -510,7 +530,12 @@ class TestRLMOutputValidation:
     def test_detect_patterns_clamps_negative_confidence(self, analyzer, mock_rlm):
         """Negative confidence should be clamped to 0.0."""
         mock_rlm.completion.return_value = self._make_result(
-            {"detected_pattern": "layered", "confidence": -0.5, "anti_patterns": [], "reasoning": "test"}
+            {
+                "detected_pattern": "layered",
+                "confidence": -0.5,
+                "anti_patterns": [],
+                "reasoning": "test",
+            }
         )
         patterns = analyzer.detect_patterns()
         assert patterns["confidence"] == 0.0
@@ -518,7 +543,12 @@ class TestRLMOutputValidation:
     def test_detect_patterns_coerces_anti_patterns_to_list(self, analyzer, mock_rlm):
         """If anti_patterns is not a list, it should be wrapped in one."""
         mock_rlm.completion.return_value = self._make_result(
-            {"detected_pattern": "layered", "confidence": 0.8, "anti_patterns": "tight coupling", "reasoning": "test"}
+            {
+                "detected_pattern": "layered",
+                "confidence": 0.8,
+                "anti_patterns": "tight coupling",
+                "reasoning": "test",
+            }
         )
         patterns = analyzer.detect_patterns()
         assert patterns["anti_patterns"] == ["tight coupling"]
@@ -535,7 +565,12 @@ class TestRLMOutputValidation:
     def test_detect_patterns_invalid_confidence_type(self, analyzer, mock_rlm):
         """Non-numeric confidence should default to 0.0."""
         mock_rlm.completion.return_value = self._make_result(
-            {"detected_pattern": "layered", "confidence": "high", "anti_patterns": [], "reasoning": "test"}
+            {
+                "detected_pattern": "layered",
+                "confidence": "high",
+                "anti_patterns": [],
+                "reasoning": "test",
+            }
         )
         patterns = analyzer.detect_patterns()
         assert patterns["confidence"] == 0.0

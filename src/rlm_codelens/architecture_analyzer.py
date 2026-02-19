@@ -387,10 +387,10 @@ Output ONLY the JSON array."""
         if graph_metrics:
             metrics_context = f"""
 Graph Metrics:
-- Cycles: {json.dumps(graph_metrics.get('cycles', [])[:5])}
-- Hub modules: {json.dumps(graph_metrics.get('hub_modules', [])[:5])}
-- Total modules: {graph_metrics.get('total_modules', 'unknown')}
-- Total edges: {graph_metrics.get('total_edges', 'unknown')}
+- Cycles: {json.dumps(graph_metrics.get("cycles", [])[:5])}
+- Hub modules: {json.dumps(graph_metrics.get("hub_modules", [])[:5])}
+- Total modules: {graph_metrics.get("total_modules", "unknown")}
+- Total edges: {graph_metrics.get("total_edges", "unknown")}
 """
 
         prompt = f"""Analyze this Python codebase's architecture and identify its architectural pattern(s).

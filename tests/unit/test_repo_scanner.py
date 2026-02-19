@@ -20,7 +20,8 @@ def sample_repo(tmp_path):
     pkg.mkdir()
     (pkg / "__init__.py").write_text('"""My package."""\n')
 
-    (pkg / "app.py").write_text(textwrap.dedent('''\
+    (pkg / "app.py").write_text(
+        textwrap.dedent('''\
         """Main application module."""
 
         import os
@@ -42,9 +43,11 @@ def sample_repo(tmp_path):
         def main():
             app = App()
             app.run()
-        '''))
+        ''')
+    )
 
-    (pkg / "models.py").write_text(textwrap.dedent('''\
+    (pkg / "models.py").write_text(
+        textwrap.dedent('''\
         """Data models."""
 
         from dataclasses import dataclass
@@ -58,9 +61,11 @@ def sample_repo(tmp_path):
         class Item:
             title: str
             value: int
-        '''))
+        ''')
+    )
 
-    (pkg / "utils.py").write_text(textwrap.dedent('''\
+    (pkg / "utils.py").write_text(
+        textwrap.dedent('''\
         """Utility functions."""
 
         def helper(x):
@@ -68,13 +73,15 @@ def sample_repo(tmp_path):
 
         def format_name(name):
             return name.strip().title()
-        '''))
+        ''')
+    )
 
     # Sub-package with relative import
     sub = pkg / "api"
     sub.mkdir()
     (sub / "__init__.py").write_text("")
-    (sub / "routes.py").write_text(textwrap.dedent('''\
+    (sub / "routes.py").write_text(
+        textwrap.dedent('''\
         """API routes."""
 
         from ..models import User
@@ -82,29 +89,34 @@ def sample_repo(tmp_path):
 
         def get_users():
             return []
-        '''))
+        ''')
+    )
 
     # Test file
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "__init__.py").write_text("")
-    (tests_dir / "test_app.py").write_text(textwrap.dedent('''\
+    (tests_dir / "test_app.py").write_text(
+        textwrap.dedent('''\
         """Tests for app module."""
 
         import pytest
 
         def test_something():
             assert True
-        '''))
+        ''')
+    )
 
     # Entry point
-    (tmp_path / "pyproject.toml").write_text(textwrap.dedent("""\
+    (tmp_path / "pyproject.toml").write_text(
+        textwrap.dedent("""\
         [project]
         name = "mypackage"
 
         [project.scripts]
         myapp = "mypackage.app:main"
-        """))
+        """)
+    )
 
     # Directory that should be excluded
     venv = tmp_path / ".venv"
