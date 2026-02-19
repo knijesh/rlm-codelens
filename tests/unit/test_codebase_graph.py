@@ -292,3 +292,111 @@ class TestArchitectureAnalysis:
         assert isinstance(d, dict)
         assert "repository" in d
         assert "graph_data" in d
+
+
+class TestAntiPatternDetection:
+    """Tests for specific anti-pattern detection in detect_anti_patterns."""
+
+    def test_detect_anti_patterns_god_module(self):
+        """A module with LOC > 500 and fan_out > 10 should be detected as god_module."""
+        # god.py imports 12 other modules
+        modules = {"god.py": ModuleInfo(
+            path="god.py",
+            package="god",
+            imports=[],
+            from_imports=[
+                {"module": f"mod{i}", "names": ["x"], "level": 0}
+                for i in range(12)
+            ],
+            classes=[],
+            functions=[],
+            lines_of_code=600,
+            is_test=False,
+        )}
+        # Add the 12 target modules
+        for i in range(12):
+            modules[f"mod{i}.py"] = ModuleInfo(
+                path=f"mod{i}.py",
+                package=f"mod{i}",
+                imports=[],
+                from_imports=[],
+                classes=[],
+                functions=[],
+                lines_of_code=20,
+                is_test=False,
+            )
+
+        structure = RepositoryStructure(
+            root_path="/fake",
+            name="god-test",
+            modules=modules,
+            packages=["god"] + [f"mod{i}" for i in range(12)],
+            entry_points=[],
+            total_files=13,
+            total_lines=840,
+        )
+        analyzer = CodebaseGraphAnalyzer(structure)
+        layers = analyzer.detect_layers()
+        patterns = analyzer.detect_anti_patterns(layers)
+        god_patterns = [p for p in patterns if p.type == "god_module"]
+        assert len(god_patterns) == 1
+        assert god_patterns[0].module == "god.py"
+        assert god_patterns[0].severity == "high"
+
+    def test_detect_anti_patterns_layer_violation(self):
+        """A 'data' layer module importing an 'api' layer module should be a layer_violation."""
+        modules = {
+            "src/models.py": ModuleInfo(
+                path="src/models.py",
+                package="src.models",
+                imports=[],
+                from_imports=[
+                    {"module": "src.api", "names": ["handler"], "level": 0}
+                ],
+                classes=[],
+                functions=[],
+                lines_of_code=30,
+                is_test=False,
+            ),
+            "src/api.py": ModuleInfo(
+                path="src/api.py",
+                package="src.api",
+                imports=[],
+                from_imports=[],
+                classes=[],
+                functions=[],
+                lines_of_code=30,
+                is_test=False,
+            ),
+        }
+        structure = RepositoryStructure(
+            root_path="/fake",
+            name="layer-test",
+            modules=modules,
+            packages=["src.models", "src.api"],
+            entry_points=[],
+            total_files=2,
+            total_lines=60,
+        )
+        analyzer = CodebaseGraphAnalyzer(structure)
+        layers = analyzer.detect_layers()
+        assert layers["src/models.py"] == "data"
+        assert layers["src/api.py"] == "api"
+        patterns = analyzer.detect_anti_patterns(layers)
+        violations = [p for p in patterns if p.type == "layer_violation"]
+        assert len(violations) >= 1
+        assert violations[0].module == "src/models.py"
+        assert violations[0].severity == "medium"
+
+    def test_find_cycles_reports_correct_cycle(self, cycle_structure):
+        """Verify the actual cycle path contains both a.py and b.py."""
+        analyzer = CodebaseGraphAnalyzer(cycle_structure)
+        cycles = analyzer.find_cycles()
+        assert len(cycles) > 0
+        # Each cycle should be a list containing both modules
+        found_cycle = False
+        for cycle in cycles:
+            if "a.py" in cycle and "b.py" in cycle:
+                found_cycle = True
+                assert len(cycle) == 2
+        assert found_cycle, f"Expected cycle with a.py and b.py, got: {cycles}"

@@ -32,6 +32,9 @@ Examples:
   # Analyze with RLM-powered deep analysis
   rlmc analyze-architecture scan.json --deep --budget 5.0
 
+  # Analyze with Ollama (free, local)
+  rlmc analyze-architecture scan.json --deep --backend openai --model llama3.1 --base-url http://localhost:11434/v1
+
   # Generate interactive architecture visualization
   rlmc visualize-arch arch.json
 
@@ -113,6 +116,11 @@ Examples:
         help="RLM model name (default: from RLM_MODEL env or 'gpt-4o')",
     )
     arch_parser.add_argument(
+        "--base-url",
+        default=None,
+        help="Override API base URL (e.g. http://localhost:11434/v1 for Ollama)",
+    )
+    arch_parser.add_argument(
         "--budget",
         type=float,
         default=10.0,
@@ -122,6 +130,23 @@ Examples:
         "--output",
         default="outputs/architecture.json",
         help="Output JSON file path (default: outputs/architecture.json)",
+    )
+
+    # list-models command
+    models_parser = subparsers.add_parser(
+        "list-models",
+        help="List available models from a local Ollama instance",
+        description="Query a running Ollama server for installed models. Useful for picking a --model for --deep analysis.",
+    )
+    models_parser.add_argument(
+        "--ollama-url",
+        default="http://localhost:11434",
+        help="Ollama server URL (default: http://localhost:11434)",
+    )
+    models_parser.add_argument(
+        "--no-select",
+        action="store_true",
+        help="Just list models without interactive selection prompt",
     )
 
     # visualize-arch command
@@ -207,8 +232,18 @@ def main(args: Optional[List[str]] = None) -> int:
                 deep=parsed_args.deep,
                 backend=parsed_args.backend,
                 model=parsed_args.model,
+                base_url=parsed_args.base_url,
                 budget=parsed_args.budget,
                 output=parsed_args.output,
+            )
+            return 0
+
+        elif parsed_args.command == "list-models":
+            from rlm_codelens.commands import list_ollama_models
+
+            list_ollama_models(
+                ollama_url=parsed_args.ollama_url,
+                interactive=not parsed_args.no_select,
             )
             return 0
 

@@ -115,7 +115,7 @@
     <section id="executive-summary">
       <h2>Executive Summary</h2>
       <div class="card executive-summary">
-        <p>This repository contains <strong>7</strong> modules (834 lines of code) with <strong>0</strong> import edges. The overall health score is <span style="color:#4ade80"><strong>94/100 (Healthy)</strong></span>. No circular dependencies were found. <strong>3</strong> anti-patterns identified. RLM deep analysis detected a <strong>unknown</strong> architectural pattern with 0% confidence. <strong>7</strong> refactoring suggestions available. <em>Key concern: address detected anti-patterns to strengthen architecture.</em></p>
+        <p>This repository contains <strong>7</strong> modules (834 lines of code) with <strong>0</strong> import edges. The overall health score is <span style="color:#4ade80"><strong>94/100 (Healthy)</strong></span>. No circular dependencies were found. <strong>3</strong> anti-patterns identified. RLM deep analysis detected a <strong>monolith</strong> architectural pattern with 80% confidence. <em>Key concern: address detected anti-patterns to strengthen architecture.</em></p>
       </div>
     </section>
     <section id="summary">
@@ -168,33 +168,29 @@
       <h2>Architectural Pattern</h2>
       <div class="card">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-          <span class="insight-badge">unknown</span>
-          <span style="color:#94a3b8">Confidence: 0%</span>
+          <span class="insight-badge">monolith</span>
+          <span style="color:#94a3b8">Confidence: 80%</span>
         </div>
         <div class="bar-bg">
-          <div class="bar-fill" style="width:0.0%;background:#fb923c"></div>
+          <div class="bar-fill" style="width:80.0%;background:#4ade80"></div>
         </div>
         
+        <div style="margin-top:12px">
+          <strong style="color:#f1f5f9">Anti-Patterns Detected:</strong>
+          <ul style="padding-left:20px;margin-top:6px;color:#cbd5e1"><li>tight coupling</li><li>god modules</li></ul>
+        </div>
         
         <div style="margin-top:12px">
           <strong style="color:#f1f5f9">Reasoning:</strong>
-          <p style="color:#cbd5e1;margin-top:4px">Could not parse RLM response</p>
+          <p style="color:#cbd5e1;margin-top:4px">The codebase consists of multiple standalone scripts with no inter-module dependencies, suggesting a monolithic architecture. Each module contains self-contained logic (e.g., CLI tools, test scripts), but lacks shared layers or abstractions. Tight coupling exists within individual modules (e.g., boilerplate.py has multiple utility functions tightly integrated into its CLI workflow), and some modules (like boilerplate.py) could be considered 'god modules' due to their broad functionality.</p>
         </div>
       </div>
     </section>
     <section id="rlm-insights">
       <h2>RLM Insights</h2>
-      
-        <div class="card" style="margin-bottom:16px">
-          <h3 style="color:#f1f5f9;font-size:1em;margin-bottom:8px">Semantic Classifications</h3>
-          <p style="color:#94a3b8;font-size:0.85em;margin-bottom:8px">
-            RLM-assigned layer for each module based on semantic analysis of code content.
-          </p>
-          <table>
-            <thead><tr><th>Module</th><th>RLM Layer</th></tr></thead>
-            <tbody><tr><td>boilerplate</td><td>util <span style="color:#fb923c" title="Static analysis assigned: business">(static: business)</span></td></tr><tr><td>boilerplate_test</td><td>test</td></tr><tr><td>fail</td><td>test</td></tr><tr><td>pass</td><td>test</td></tr><tr><td>verify-flags-underscore</td><td>util <span style="color:#fb923c" title="Static analysis assigned: business">(static: business)</span></td></tr><tr><td>extract</td><td>util</td></tr><tr><td>train_wide_deep</td><td>test</td></tr></tbody>
-          </table>
-        </div>
+      <div class="card">
+        <p style="color:#94a3b8">Deep analysis found no semantic classifications or hidden dependencies for this codebase.</p>
+      </div>
     </section>
     <section id="fan-metrics">
       <h2>Understanding Fan-In &amp; Fan-Out</h2>
@@ -327,17 +323,7 @@
     <section id="refactoring">
       <h2>Refactoring Recommendations</h2>
       <div class="card">
-        <p style="color:#94a3b8;margin-bottom:12px">
-          7 suggestions from RLM deep analysis:
-        </p>
-        <div class="refactoring-item"><div class="refactoring-number">1</div><div class="refactoring-content">Refactor 'hack/boilerplate/boilerplate.py' by consolidating related functions into a class. Encapsulating the functions 'get_refs', 'is_generated_file', 'file_passes', 'file_extension', 'normalize_files', 'get_files', 'get_dates', 'get_regexs' into a class can help improve cohesion and provide a more organized structure, making it easier to understand and maintain.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">2</div><div class="refactoring-content">In 'hack/boilerplate/boilerplate.py' and 'hack/verify-flags-underscore.py', consider extracting common utility functions into a shared module. Given the classification as 'util', a shared utility module can reduce redundancy and improve code reuse, particularly for functions handling file operations or regex processing.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">3</div><div class="refactoring-content">Address the orphan status of 'hack/boilerplate/boilerplate.py' by determining if the functionalities can be used by other modules or if it can be integrated with related tools in the system. This ensures that the utility does not remain isolated, enhancing its usefulness across the application.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">4</div><div class="refactoring-content">For 'hack/verify-flags-underscore.py', consider creating integration points with other scripts or test modules to ensure its utility is effectively leveraged. This could involve documenting its usage or creating scripts that demonstrate operational scenarios, which can also aid in knowledge transfer.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">5</div><div class="refactoring-content">Refactor 'staging/src/k8s.io/kubectl/pkg/util/i18n/translations/extract.py' to better engage with the broader project it supports. This might include documentation on usage or extending its interface to handle more complex string extraction scenarios, provided such a need exists, thereby increasing its value as a utility.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">6</div><div class="refactoring-content">Audit the imports in 'test/images/node-perf/pytorch-wide-deep/train_wide_deep.py' and look for opportunities to reduce redundant package imports. Reducing unnecessary imports can streamline the codebase, reducing memory footprint and potential dependency issues.</div></div>
-<div class="refactoring-item"><div class="refactoring-number">7</div><div class="refactoring-content">Conduct a module dependency analysis across the entire project to identify further opportunities for refactoring orphan modules into larger, more cohesive elements. This can strengthen the architecture by uncovering potential synergies between otherwise isolated components.</div></div>
-
+        <p style="color:#94a3b8">Deep analysis found no refactoring suggestions for this codebase.</p>
       </div>
     </section>
     <section id="layers">

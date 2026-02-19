@@ -233,11 +233,11 @@ analysis.save("architecture.json")
 
 <img src="samples/RLM_Sample_2.png" width="500"/>
 
-> **View the full HTML report:** [kubernetes_report.html](samples/kubernetes_report.html) — download and open in your browser.
+> **View the full HTML report:** [kubernetes_report.html](https://htmlpreview.github.io/?https://github.com/knijesh/rlm-codelens/blob/main/samples/kubernetes_report.html)
 
 ### Interactive Architecture Visualization
 
-> **View the full interactive visualization:** [kubernetes_viz.html](samples/kubernetes_viz.html) — download and open in your browser.
+> **View the full interactive visualization:** [kubernetes_viz.html](https://htmlpreview.github.io/?https://github.com/knijesh/rlm-codelens/blob/main/samples/kubernetes_viz.html)
 
 
 ## Contributing

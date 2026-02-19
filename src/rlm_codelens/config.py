@@ -27,6 +27,7 @@ BUDGET_ALERT_THRESHOLD = int(os.getenv("BUDGET_ALERT_THRESHOLD", "80"))
 # RLM Architecture Analyzer Configuration
 RLM_BACKEND = os.getenv("RLM_BACKEND", "openai")
 RLM_MODEL = os.getenv("RLM_MODEL", "gpt-4o")
+RLM_BASE_URL = os.getenv("RLM_BASE_URL", "")  # e.g. http://localhost:11434/v1 for Ollama
 RLM_ENVIRONMENT = os.getenv("RLM_ENVIRONMENT", "local")
 RLM_MAX_ITERATIONS = int(os.getenv("RLM_MAX_ITERATIONS", "30"))
 

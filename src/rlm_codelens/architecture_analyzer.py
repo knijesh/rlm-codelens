@@ -11,6 +11,12 @@ Example:
     >>> analyzer = ArchitectureRLMAnalyzer(scan_data, backend="openai", model="gpt-4o")
     >>> results = analyzer.run_all()
     >>> print(results["semantic_clusters"])
+
+    # Using Ollama (local, free):
+    >>> analyzer = ArchitectureRLMAnalyzer(
+    ...     scan_data, backend="openai", model="llama3.1",
+    ...     base_url="http://localhost:11434/v1", api_key="ollama",
+    ... )
 """
 
 import json
@@ -105,19 +111,38 @@ class BudgetExceededError(Exception):
 
 
 _MARKDOWN_FENCE_RE = re.compile(
-    r"^\s*```(?:json|python|text)?\s*\n(.*?)\n\s*```\s*$",
+    r"```\w*\s*\n(.*?)\n\s*```",
     re.DOTALL,
 )
 
 
 def _strip_markdown_fences(text: str) -> str:
-    """Strip markdown code fences from an RLM response before JSON parsing.
+    """Extract JSON from an RLM response, handling markdown fences and extra text.
 
-    Handles responses wrapped in ```json ... ``` or plain ``` ... ```.
+    Handles responses wrapped in ```json ... ```, ```repl ... ```,
+    or any other fenced code block. Also handles bare JSON with
+    surrounding prose.
     """
+    # Try fenced code block first
     match = _MARKDOWN_FENCE_RE.search(text)
     if match:
         return match.group(1).strip()
+
+    # Try to extract bare JSON object or array from the text
+    # Pick whichever bracket type appears first
+    obj_start = text.find("{")
+    arr_start = text.find("[")
+
+    if arr_start != -1 and (obj_start == -1 or arr_start < obj_start):
+        end = text.rfind("]")
+        if end > arr_start:
+            return text[arr_start : end + 1]
+
+    if obj_start != -1:
+        end = text.rfind("}")
+        if end > obj_start:
+            return text[obj_start : end + 1]
+
     return text.strip()
 
 
@@ -127,8 +152,10 @@ class ArchitectureRLMAnalyzer:
     Args:
         structure: Scanned repository structure.
         backend: RLM backend name (e.g., "openai", "anthropic").
-        model: Model name (e.g., "gpt-4o").
+        model: Model name (e.g., "gpt-4o", "llama3.1").
         api_key: API key for the backend (reads from env if not provided).
+        base_url: Override base URL for the backend API (e.g.,
+            "http://localhost:11434/v1" for Ollama).
         environment: RLM environment ("local" or "docker").
         max_iterations: Max RLM iterations per completion call.
         budget: Maximum spend in USD.
@@ -141,6 +168,7 @@ class ArchitectureRLMAnalyzer:
         backend: str = "openai",
         model: str = "gpt-4o",
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         environment: str = "local",
         max_iterations: int = 30,
         budget: float = 10.0,
@@ -162,6 +190,12 @@ class ArchitectureRLMAnalyzer:
         backend_kwargs: Dict[str, Any] = {"model_name": model}
         if api_key:
             backend_kwargs["api_key"] = api_key
+        if base_url:
+            backend_kwargs["base_url"] = base_url
+            # Local servers (Ollama, vLLM) don't need a real API key,
+            # but the OpenAI client library requires a non-empty string.
+            if not api_key:
+                backend_kwargs.setdefault("api_key", "ollama")
 
         self.rlm = RLM(
             backend=backend,
@@ -234,7 +268,14 @@ Output ONLY the JSON object, no other text."""
         try:
             classifications = json.loads(_strip_markdown_fences(result.response))
             if isinstance(classifications, dict):
-                return classifications
+                # Filter out keys not in structure.modules (unknown modules)
+                known = set(self.structure.modules.keys())
+                unknown = set(classifications.keys()) - known
+                if unknown:
+                    self._log(
+                        f"Warning: Dropping {len(unknown)} unknown module(s) from classification: {sorted(unknown)[:5]}"
+                    )
+                return {k: v for k, v in classifications.items() if k in known}
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -303,7 +344,24 @@ Output ONLY the JSON array."""
         try:
             deps = json.loads(_strip_markdown_fences(result.response))
             if isinstance(deps, list):
-                return deps
+                required_keys = {"source", "target", "type", "evidence"}
+                validated = []
+                for item in deps:
+                    if not isinstance(item, dict):
+                        continue
+                    missing = required_keys - set(item.keys())
+                    if missing:
+                        self._log(
+                            f"Warning: Dropping hidden dep missing keys {missing}: {item}"
+                        )
+                        continue
+                    if item["source"] == item["target"]:
+                        self._log(
+                            f"Warning: Dropping self-referencing hidden dep: {item['source']}"
+                        )
+                        continue
+                    validated.append(item)
+                return validated
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -364,6 +422,23 @@ Output ONLY the JSON."""
         try:
             patterns = json.loads(_strip_markdown_fences(result.response))
             if isinstance(patterns, dict):
+                # Ensure required keys exist with sensible defaults
+                patterns.setdefault("detected_pattern", "unknown")
+                patterns.setdefault("confidence", 0.0)
+                patterns.setdefault("anti_patterns", [])
+                patterns.setdefault("reasoning", "")
+
+                # Clamp confidence to [0.0, 1.0]
+                try:
+                    conf = float(patterns["confidence"])
+                    patterns["confidence"] = max(0.0, min(1.0, conf))
+                except (ValueError, TypeError):
+                    patterns["confidence"] = 0.0
+
+                # Ensure anti_patterns is a list
+                if not isinstance(patterns["anti_patterns"], list):
+                    patterns["anti_patterns"] = [patterns["anti_patterns"]]
+
                 return patterns
         except (json.JSONDecodeError, TypeError):
             pass

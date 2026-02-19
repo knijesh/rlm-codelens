@@ -124,7 +124,7 @@ checkpoints/
 
 # Keep sample artifacts (screenshots, HTML, logs)
 !samples/
-!samples/**
+samples/*log.txt
 
 # But do NOT track extremely large viz HTML
 samples/pytorch_viz.html

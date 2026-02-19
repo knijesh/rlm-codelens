@@ -9,13 +9,15 @@
 # 3. Generate interactive visualization
 #
 # Usage:
-#   ./run_analysis.sh <path-or-url> [output-prefix] [--deep]
+#   ./run_analysis.sh <path-or-url> [output-prefix] [--deep] [--ollama] [--model MODEL]
 #
 # Examples:
 #   ./run_analysis.sh /path/to/local/repo
 #   ./run_analysis.sh https://github.com/encode/starlette starlette
 #   ./run_analysis.sh . self
-#   ./run_analysis.sh . self --deep        # Enable RLM deep analysis
+#   ./run_analysis.sh . self --deep                    # Deep analysis with OpenAI
+#   ./run_analysis.sh . self --deep --ollama           # Deep analysis with Ollama (interactive model select)
+#   ./run_analysis.sh . self --deep --ollama --model llama3.1   # Deep with specific Ollama model
 ################################################################################
 
 set -e  # Exit on error
@@ -32,19 +34,31 @@ OUTPUTS_DIR="outputs"
 
 # Parse arguments
 DEEP=false
+USE_OLLAMA=false
+OLLAMA_URL="http://localhost:11434"
+MODEL=""
 POSITIONAL=()
-for arg in "$@"; do
-    case $arg in
-        --deep) DEEP=true ;;
-        *) POSITIONAL+=("$arg") ;;
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --deep) DEEP=true; shift ;;
+        --ollama) USE_OLLAMA=true; shift ;;
+        --ollama-url) OLLAMA_URL="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        *) POSITIONAL+=("$1"); shift ;;
     esac
 done
 
 if [ ${#POSITIONAL[@]} -eq 0 ]; then
     echo -e "${RED}Error: Repository path or URL required${NC}"
-    echo "Usage: $0 <path-or-url> [output-prefix] [--deep]"
-    echo "Example: $0 /path/to/repo myrepo --deep"
+    echo "Usage: $0 <path-or-url> [output-prefix] [--deep] [--ollama] [--model MODEL]"
+    echo "Example: $0 /path/to/repo myrepo --deep --ollama"
     exit 1
+fi
+
+# If --ollama is used, --deep is implied
+if [ "$USE_OLLAMA" = true ]; then
+    DEEP=true
 fi
 
 REPO="${POSITIONAL[0]}"
@@ -58,6 +72,14 @@ echo -e "${GREEN}Repository:${NC} $REPO"
 echo -e "${GREEN}Output Prefix:${NC} $PREFIX"
 echo -e "${GREEN}Output Directory:${NC} $OUTPUTS_DIR"
 echo -e "${GREEN}Deep Analysis:${NC} $DEEP"
+if [ "$USE_OLLAMA" = true ]; then
+    echo -e "${GREEN}Backend:${NC} Ollama ($OLLAMA_URL)"
+    if [ -n "$MODEL" ]; then
+        echo -e "${GREEN}Model:${NC} $MODEL"
+    else
+        echo -e "${GREEN}Model:${NC} (interactive selection)"
+    fi
+fi
 echo ""
 
 # Create outputs directory if it doesn't exist
@@ -101,14 +123,31 @@ echo ""
 
 ARCH_FILE="$OUTPUTS_DIR/${PREFIX}_arch.json"
 
-ARCH_CMD="uv run rlmc analyze-architecture $SCAN_FILE --output $ARCH_FILE"
 ARCH_ARGS=("$SCAN_FILE" --output "$ARCH_FILE")
 if [ "$DEEP" = true ]; then
-    ARCH_CMD="$ARCH_CMD --deep"
     ARCH_ARGS+=(--deep)
 fi
 
-echo -e "${BLUE}Running:${NC} $ARCH_CMD"
+if [ "$USE_OLLAMA" = true ]; then
+    ARCH_ARGS+=(--backend openai --base-url "${OLLAMA_URL}/v1")
+
+    if [ -z "$MODEL" ]; then
+        # Interactive model selection
+        echo -e "${YELLOW}Querying Ollama for available models...${NC}"
+        uv run rlmc list-models --ollama-url "$OLLAMA_URL" --no-select
+        echo ""
+        read -rp "  Enter model name (or number) to use: " MODEL
+        if [ -z "$MODEL" ]; then
+            echo -e "${RED}Error: No model selected. Aborting.${NC}"
+            exit 1
+        fi
+    fi
+
+    ARCH_ARGS+=(--model "$MODEL")
+    echo -e "${GREEN}Using Ollama model:${NC} $MODEL"
+fi
+
+echo -e "${BLUE}Running:${NC} uv run rlmc analyze-architecture ${ARCH_ARGS[*]}"
 uv run rlmc analyze-architecture "${ARCH_ARGS[@]}"
 
 if [ ! -f "$ARCH_FILE" ]; then
@@ -159,6 +198,16 @@ if [ ! -f "$REPORT_FILE" ]; then
 fi
 
 echo -e "${GREEN}✓ Report generated: $REPORT_FILE${NC}"
+echo ""
+
+################################################################################
+# Copy outputs to samples/ for GitHub visibility
+################################################################################
+echo -e "${YELLOW}Copying outputs to samples/ ...${NC}"
+mkdir -p samples
+cp "$VIZ_FILE" "samples/${PREFIX}_viz.html"
+cp "$REPORT_FILE" "samples/${PREFIX}_report.html"
+echo -e "${GREEN}✓ Copied to samples/${NC}"
 echo ""
 
 ################################################################################

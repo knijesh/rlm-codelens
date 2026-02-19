@@ -32,6 +32,111 @@ def run_phase(
         raise
 
 
+def _fetch_ollama_models(ollama_url: str = "http://localhost:11434") -> Optional[list]:
+    """Query Ollama for installed models.
+
+    Args:
+        ollama_url: Base URL for the Ollama server.
+
+    Returns:
+        List of model dicts, or None if Ollama is unreachable.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(f"{ollama_url}/api/tags")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        return sorted(data.get("models", []), key=lambda x: x.get("name", ""))
+    except urllib.error.URLError:
+        return None
+    except Exception:
+        return None
+
+
+def _print_ollama_table(models: list) -> None:
+    """Print a numbered table of Ollama models."""
+    print(f"\n  {'#':<4} {'Model':<35} {'Size':>10}  {'Modified'}")
+    print("  " + "-" * 66)
+    for i, m in enumerate(models, 1):
+        name = m.get("name", "unknown")
+        size_gb = m.get("size", 0) / (1024**3)
+        modified = m.get("modified_at", "")[:10]
+        print(f"  {i:<4} {name:<35} {size_gb:>7.1f} GB  {modified}")
+
+
+def _select_ollama_model(
+    ollama_url: str = "http://localhost:11434",
+) -> Optional[str]:
+    """Interactively select an Ollama model. Returns model name or None."""
+    models = _fetch_ollama_models(ollama_url)
+    if models is None:
+        print(f"\n❌ Could not connect to Ollama at {ollama_url}")
+        print("   Make sure Ollama is running:  ollama serve")
+        return None
+    if not models:
+        print("\nNo models installed. Pull one with:  ollama pull llama3.1")
+        return None
+
+    _print_ollama_table(models)
+    print()
+
+    while True:
+        try:
+            choice = input(f"  Select model [1-{len(models)}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= len(models):
+            selected = models[int(choice) - 1]["name"]
+            print(f"  → Selected: {selected}")
+            return selected
+        # Also accept a model name typed directly
+        names = [m["name"] for m in models]
+        if choice in names:
+            print(f"  → Selected: {choice}")
+            return choice
+        print(f"  Invalid choice. Enter a number 1-{len(models)} or a model name.")
+
+
+def list_ollama_models(
+    ollama_url: str = "http://localhost:11434",
+    interactive: bool = True,
+) -> None:
+    """List models available on a local Ollama instance.
+
+    Args:
+        ollama_url: Base URL for the Ollama server.
+        interactive: If True, prompt user to select a model.
+    """
+    print(f"\nQuerying Ollama at {ollama_url} ...")
+
+    models = _fetch_ollama_models(ollama_url)
+    if models is None:
+        print(f"\n❌ Could not connect to Ollama at {ollama_url}")
+        print("   Make sure Ollama is running:  ollama serve")
+        return
+    if not models:
+        print("\nNo models installed. Pull one with:  ollama pull llama3.1")
+        return
+
+    _print_ollama_table(models)
+    print(f"\n  {len(models)} model(s) available.")
+
+    if not interactive:
+        return
+
+    print()
+    selected = _select_ollama_model(ollama_url)
+    if selected:
+        print(f"\n  Run deep analysis with this model:")
+        print(f"  rlmc analyze-architecture scan.json --deep \\")
+        print(f"    --backend openai --model {selected} \\")
+        print(f"    --base-url {ollama_url}/v1")
+
+
 def scan_repository(
     repo_path: str,
     output: str = "outputs/scan.json",
@@ -113,6 +218,7 @@ def analyze_architecture(
     deep: bool = False,
     backend: Optional[str] = None,
     model: Optional[str] = None,
+    base_url: Optional[str] = None,
     budget: float = 10.0,
     output: str = "outputs/architecture.json",
 ) -> None:
@@ -124,11 +230,12 @@ def analyze_architecture(
         deep: Enable RLM-powered deep analysis
         backend: RLM backend name
         model: RLM model name
+        base_url: Override API base URL (e.g. http://localhost:11434/v1 for Ollama)
         budget: RLM budget limit
         output: Output JSON file path
     """
     from rlm_codelens.codebase_graph import CodebaseGraphAnalyzer
-    from rlm_codelens.config import RLM_BACKEND, RLM_MODEL
+    from rlm_codelens.config import RLM_BACKEND, RLM_BASE_URL, RLM_MODEL
     from rlm_codelens.repo_scanner import RepositoryScanner, RepositoryStructure
 
     print("\n" + "=" * 70)
@@ -206,16 +313,31 @@ def analyze_architecture(
             from rlm_codelens.architecture_analyzer import ArchitectureRLMAnalyzer
 
             rlm_backend = backend or RLM_BACKEND
+            rlm_base_url = base_url or RLM_BASE_URL or None
             rlm_model = model or RLM_MODEL
+
+            # Interactive model selection when using Ollama without explicit --model
+            if rlm_base_url and not model and "11434" in rlm_base_url:
+                ollama_base = rlm_base_url.rstrip("/").removesuffix("/v1")
+                print("\nOllama detected — select a model:\n")
+                selected = _select_ollama_model(ollama_base)
+                if not selected:
+                    print("\n❌ No model selected. Aborting deep analysis.")
+                    return
+                rlm_model = selected
+                print()
 
             print(f"Backend: {rlm_backend}")
             print(f"Model: {rlm_model}")
+            if rlm_base_url:
+                print(f"Base URL: {rlm_base_url}")
             print(f"Budget: ${budget:.2f}")
 
             rlm_analyzer = ArchitectureRLMAnalyzer(
                 structure=structure,
                 backend=rlm_backend,
                 model=rlm_model,
+                base_url=rlm_base_url,
                 budget=budget,
             )
 

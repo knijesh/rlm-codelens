@@ -412,3 +412,130 @@ class TestMarkdownFencedResponses:
         deps = analyzer.discover_hidden_deps()
         assert len(deps) == 1
         assert deps[0]["type"] == "dynamic_import"
+
+
+class TestRLMOutputValidation:
+    """Tests for RLM output validation logic."""
+
+    @pytest.fixture
+    def mock_rlm(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def analyzer(self, simple_structure, mock_rlm):
+        import rlm_codelens.architecture_analyzer as mod
+
+        original_available = mod.RLM_AVAILABLE
+        original_rlm = getattr(mod, "RLM", None)
+        mod.RLM_AVAILABLE = True
+        mod.RLM = MagicMock(return_value=mock_rlm)
+        try:
+            a = mod.ArchitectureRLMAnalyzer(
+                simple_structure,
+                backend="openai",
+                model="gpt-4o",
+                budget=10.0,
+                verbose=False,
+            )
+            a.rlm = mock_rlm
+            yield a
+        finally:
+            mod.RLM_AVAILABLE = original_available
+            if original_rlm is not None:
+                mod.RLM = original_rlm
+            elif hasattr(mod, "RLM"):
+                delattr(mod, "RLM")
+
+    def _make_result(self, response_json):
+        result = MagicMock()
+        result.response = json.dumps(response_json)
+        result.usage = MagicMock()
+        result.usage.total_cost = 0.01
+        return result
+
+    def test_classify_modules_filters_unknown_modules(self, analyzer, mock_rlm):
+        """Unknown module paths not in structure.modules should be filtered out."""
+        mock_rlm.completion.return_value = self._make_result(
+            {"src/main.py": "business", "src/utils.py": "util", "nonexistent.py": "api"}
+        )
+        classifications = analyzer.classify_modules()
+        assert "nonexistent.py" not in classifications
+        assert classifications == {"src/main.py": "business", "src/utils.py": "util"}
+
+    def test_discover_hidden_deps_drops_missing_keys(self, analyzer, mock_rlm):
+        """Items missing required keys (source, target, type, evidence) should be dropped."""
+        mock_rlm.completion.return_value = self._make_result(
+            [
+                {"source": "a.py", "target": "b.py", "type": "dynamic_import", "evidence": "importlib"},
+                {"source": "a.py", "target": "c.py"},  # missing type and evidence
+                {"source": "d.py"},  # missing most keys
+            ]
+        )
+        deps = analyzer.discover_hidden_deps()
+        assert len(deps) == 1
+        assert deps[0]["target"] == "b.py"
+
+    def test_discover_hidden_deps_drops_self_references(self, analyzer, mock_rlm):
+        """Self-referencing deps (source == target) should be dropped."""
+        mock_rlm.completion.return_value = self._make_result(
+            [
+                {"source": "a.py", "target": "a.py", "type": "dynamic_import", "evidence": "self"},
+                {"source": "a.py", "target": "b.py", "type": "dynamic_import", "evidence": "importlib"},
+            ]
+        )
+        deps = analyzer.discover_hidden_deps()
+        assert len(deps) == 1
+        assert deps[0]["target"] == "b.py"
+
+    def test_discover_hidden_deps_drops_non_dict_items(self, analyzer, mock_rlm):
+        """Non-dict items in the list should be dropped."""
+        mock_rlm.completion.return_value = self._make_result(
+            [
+                "not a dict",
+                42,
+                {"source": "a.py", "target": "b.py", "type": "dyn", "evidence": "x"},
+            ]
+        )
+        deps = analyzer.discover_hidden_deps()
+        assert len(deps) == 1
+
+    def test_detect_patterns_clamps_confidence(self, analyzer, mock_rlm):
+        """Confidence should be clamped to [0.0, 1.0]."""
+        mock_rlm.completion.return_value = self._make_result(
+            {"detected_pattern": "layered", "confidence": 1.5, "anti_patterns": [], "reasoning": "test"}
+        )
+        patterns = analyzer.detect_patterns()
+        assert patterns["confidence"] == 1.0
+
+    def test_detect_patterns_clamps_negative_confidence(self, analyzer, mock_rlm):
+        """Negative confidence should be clamped to 0.0."""
+        mock_rlm.completion.return_value = self._make_result(
+            {"detected_pattern": "layered", "confidence": -0.5, "anti_patterns": [], "reasoning": "test"}
+        )
+        patterns = analyzer.detect_patterns()
+        assert patterns["confidence"] == 0.0
+
+    def test_detect_patterns_coerces_anti_patterns_to_list(self, analyzer, mock_rlm):
+        """If anti_patterns is not a list, it should be wrapped in one."""
+        mock_rlm.completion.return_value = self._make_result(
+            {"detected_pattern": "layered", "confidence": 0.8, "anti_patterns": "tight coupling", "reasoning": "test"}
+        )
+        patterns = analyzer.detect_patterns()
+        assert patterns["anti_patterns"] == ["tight coupling"]
+
+    def test_detect_patterns_defaults_missing_keys(self, analyzer, mock_rlm):
+        """Missing keys should get sensible defaults."""
+        mock_rlm.completion.return_value = self._make_result({})
+        patterns = analyzer.detect_patterns()
+        assert patterns["detected_pattern"] == "unknown"
+        assert patterns["confidence"] == 0.0
+        assert patterns["anti_patterns"] == []
+        assert patterns["reasoning"] == ""
+
+    def test_detect_patterns_invalid_confidence_type(self, analyzer, mock_rlm):
+        """Non-numeric confidence should default to 0.0."""
+        mock_rlm.completion.return_value = self._make_result(
+            {"detected_pattern": "layered", "confidence": "high", "anti_patterns": [], "reasoning": "test"}
+        )
+        patterns = analyzer.detect_patterns()
+        assert patterns["confidence"] == 0.0

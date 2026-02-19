@@ -65,6 +65,29 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
+[tool.coverage.run]
+source = ["rlm_codelens"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/cli.py",
+    "*/commands.py",
+    "*/config.py",
+    "*/visualizer.py",
+    "*/utils/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+    "if TYPE_CHECKING",
+]
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
