@@ -131,8 +131,8 @@ def list_ollama_models(
     print()
     selected = _select_ollama_model(ollama_url)
     if selected:
-        print(f"\n  Run deep analysis with this model:")
-        print(f"  rlmc analyze-architecture scan.json --deep \\")
+        print("\n  Run deep analysis with this model:")
+        print("  rlmc analyze-architecture scan.json --deep \\")
         print(f"    --backend openai --model {selected} \\")
         print(f"    --base-url {ollama_url}/v1")
 

@@ -8,10 +8,9 @@ import pytest
 
 from rlm_codelens.report_generator import (
     _build_executive_summary_section,
-    _build_rlm_insights_section,
     _build_pattern_analysis_section,
     _build_refactoring_section,
-    _escape,
+    _build_rlm_insights_section,
     _health_rating,
     _md_to_html,
     generate_analysis_report,

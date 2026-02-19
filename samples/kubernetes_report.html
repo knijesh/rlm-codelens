@@ -115,7 +115,7 @@
     <section id="executive-summary">
       <h2>Executive Summary</h2>
       <div class="card executive-summary">
-        <p>This repository contains <strong>7</strong> modules (834 lines of code) with <strong>0</strong> import edges. The overall health score is <span style="color:#4ade80"><strong>94/100 (Healthy)</strong></span>. No circular dependencies were found. <strong>3</strong> anti-patterns identified. RLM deep analysis detected a <strong>monolith</strong> architectural pattern with 80% confidence. <em>Key concern: address detected anti-patterns to strengthen architecture.</em></p>
+        <p>This repository contains <strong>7</strong> modules (834 lines of code) with <strong>0</strong> import edges. The overall health score is <span style="color:#4ade80"><strong>94/100 (Healthy)</strong></span>. No circular dependencies were found. <strong>3</strong> anti-patterns identified. RLM deep analysis detected a <strong>modular monolith</strong> architectural pattern with 70% confidence. <strong>6</strong> refactoring suggestions available. <em>Key concern: address detected anti-patterns to strengthen architecture.</em></p>
       </div>
     </section>
     <section id="summary">
@@ -168,29 +168,37 @@
       <h2>Architectural Pattern</h2>
       <div class="card">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-          <span class="insight-badge">monolith</span>
-          <span style="color:#94a3b8">Confidence: 80%</span>
+          <span class="insight-badge">modular monolith</span>
+          <span style="color:#94a3b8">Confidence: 70%</span>
         </div>
         <div class="bar-bg">
-          <div class="bar-fill" style="width:80.0%;background:#4ade80"></div>
+          <div class="bar-fill" style="width:70.0%;background:#4ade80"></div>
         </div>
         
         <div style="margin-top:12px">
           <strong style="color:#f1f5f9">Anti-Patterns Detected:</strong>
-          <ul style="padding-left:20px;margin-top:6px;color:#cbd5e1"><li>tight coupling</li><li>god modules</li></ul>
+          <ul style="padding-left:20px;margin-top:6px;color:#cbd5e1"><li>lack of cohesion</li></ul>
         </div>
         
         <div style="margin-top:12px">
           <strong style="color:#f1f5f9">Reasoning:</strong>
-          <p style="color:#cbd5e1;margin-top:4px">The codebase consists of multiple standalone scripts with no inter-module dependencies, suggesting a monolithic architecture. Each module contains self-contained logic (e.g., CLI tools, test scripts), but lacks shared layers or abstractions. Tight coupling exists within individual modules (e.g., boilerplate.py has multiple utility functions tightly integrated into its CLI workflow), and some modules (like boilerplate.py) could be considered 'god modules' due to their broad functionality.</p>
+          <p style="color:#cbd5e1;margin-top:4px">The codebase is structured into distinct modules with relatively independent functionalities, indicating a modular approach. However, the metrics show no fan-in or fan-out, suggesting limited interaction between modules and potential underutilization of modular benefits. The absence of cycles and limited edges also suggest a monolithic nature. The lack of cohesion among modules could be an anti-pattern as each module appears isolated without much integration.</p>
         </div>
       </div>
     </section>
     <section id="rlm-insights">
       <h2>RLM Insights</h2>
-      <div class="card">
-        <p style="color:#94a3b8">Deep analysis found no semantic classifications or hidden dependencies for this codebase.</p>
-      </div>
+      
+        <div class="card" style="margin-bottom:16px">
+          <h3 style="color:#f1f5f9;font-size:1em;margin-bottom:8px">Semantic Classifications</h3>
+          <p style="color:#94a3b8;font-size:0.85em;margin-bottom:8px">
+            RLM-assigned layer for each module based on semantic analysis of code content.
+          </p>
+          <table>
+            <thead><tr><th>Module</th><th>RLM Layer</th></tr></thead>
+            <tbody><tr><td>boilerplate</td><td>util <span style="color:#fb923c" title="Static analysis assigned: business">(static: business)</span></td></tr><tr><td>boilerplate_test</td><td>test</td></tr><tr><td>fail</td><td>test</td></tr><tr><td>pass</td><td>test</td></tr><tr><td>verify-flags-underscore</td><td>util <span style="color:#fb923c" title="Static analysis assigned: business">(static: business)</span></td></tr><tr><td>extract</td><td>util</td></tr><tr><td>train_wide_deep</td><td>test</td></tr></tbody>
+          </table>
+        </div>
     </section>
     <section id="fan-metrics">
       <h2>Understanding Fan-In &amp; Fan-Out</h2>
@@ -323,7 +331,16 @@
     <section id="refactoring">
       <h2>Refactoring Recommendations</h2>
       <div class="card">
-        <p style="color:#94a3b8">Deep analysis found no refactoring suggestions for this codebase.</p>
+        <p style="color:#94a3b8;margin-bottom:12px">
+          6 suggestions from RLM deep analysis:
+        </p>
+        <div class="refactoring-item"><div class="refactoring-number">1</div><div class="refactoring-content">Refactor the module 'hack/boilerplate/boilerplate.py' to move functions to more appropriate modules based on functionality. For example, if any of the utility functions are specific to a particular functionality outside the boilerplate scope, consider relocating them. This will reduce the orphan status and increase cohesion within modules.</div></div>
+<div class="refactoring-item"><div class="refactoring-number">2</div><div class="refactoring-content">Unify the test files 'hack/boilerplate/test/fail.py' and 'hack/boilerplate/test/pass.py' by integrating them into a single test suite. This can simplify the test structure and make it easier to manage and scale tests by clearly delineating test cases within a singular context.</div></div>
+<div class="refactoring-item"><div class="refactoring-number">3</div><div class="refactoring-content">Consolidate the 'hack/verify-flags-underscore.py' logic within a common utility package, especially if similar logic exists in other utility or check modules. This will reduce redundancy and align related functionalities, allowing ease of maintenance and extending functionalities if needed.</div></div>
+<div class="refactoring-item"><div class="refactoring-number">4</div><div class="refactoring-content">Consider merging similar functionalities of 'staging/src/k8s.io/kubectl/pkg/util/i18n/translations/extract.py' within a broader i18n utility package. This can help develop a comprehensive localization toolkit, enabling more robust translation handling across the system, minimizing orphan status.</div></div>
+<div class="refactoring-item"><div class="refactoring-number">5</div><div class="refactoring-content">Ensure that all utility modules have either a direct or indirect integration point with the core application code, possibly by developing wrapper methods or integration adapters, which will help link these orphaned modules with active processing flows.</div></div>
+<div class="refactoring-item"><div class="refactoring-number">6</div><div class="refactoring-content">Normalize function naming and structure within the module 'hack/boilerplate/boilerplate.py' to follow a consistent pattern, aiding in readability and better aligning with Python best practices, which might also facilitate easier refactoring of code among different modules.</div></div>
+
       </div>
     </section>
     <section id="layers">
