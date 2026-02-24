@@ -2,7 +2,6 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/knijesh/rlm-codelens/workflows/CI/badge.svg)](https://github.com/knijesh/rlm-codelens/actions)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 > **Whole-codebase architecture intelligence powered by Recursive Language Models.**
@@ -13,91 +12,23 @@ Understanding a large codebase is one of the hardest problems in software engine
 
 | Challenge | Why LLMs Fail | How RLM Works |
 |-----------|--------------|---------------|
-| Codebases are too large for a single context window | GPT-4 can see ~100K tokens; vLLM has 2,504 files | Recursively decomposes the codebase into manageable chunks |
+| Codebases are too large for a single context window | GPT-4 can see ~100K tokens; Kubernetes has 2,700+ files | Recursively decomposes the codebase into manageable chunks |
 | Imports form complex dependency graphs | LLMs can't reliably trace transitive dependencies | Builds a real graph with NetworkX, then reasons over it |
 | Architecture has layers and patterns | LLMs hallucinate structure without seeing the full picture | Static analysis first, RLM enriches with semantic understanding |
 | Anti-patterns hide in the connections | A single file looks fine; problems emerge from relationships | Graph algorithms detect cycles, hubs, and layering violations |
 
-## How It Works
+## Multi-Language Support
 
-```mermaid
-flowchart TB
-    Start([User Input: Repository Path]) --> Scanner
-    
-    subgraph Phase1["Phase 1: Repository Scanning"]
-        Scanner[repo_scanner.py<br/>AST Parser] --> ScanData[(scan.json<br/>Module Structure)]
-        Scanner --> |Extracts| Imports[Imports & Dependencies]
-        Scanner --> |Extracts| Classes[Classes & Functions]
-        Scanner --> |Extracts| Metadata[LOC, Docstrings, Tests]
-    end
-    
-    ScanData --> GraphBuilder
-    
-    subgraph Phase2["Phase 2: Static Analysis"]
-        GraphBuilder[codebase_graph.py<br/>NetworkX Graph] --> Graph[(Dependency Graph)]
-        Graph --> Cycles[Cycle Detection]
-        Graph --> Hubs[Hub Module Detection]
-        Graph --> Coupling[Coupling Metrics]
-        Graph --> Layers[Layer Classification]
-        Graph --> AntiPatterns[Anti-Pattern Detection]
-    end
-    
-    Graph --> Decision{Deep Analysis?}
-    
-    Decision -->|No| StaticResults[Static Analysis Results]
-    Decision -->|Yes| RLMAnalysis
-    
-    subgraph Phase3["Phase 3: RLM Deep Analysis (Optional)"]
-        RLMAnalysis[architecture_analyzer.py<br/>RLM API] --> Classify[Module Classification]
-        RLMAnalysis --> Hidden[Hidden Dependencies]
-        RLMAnalysis --> Patterns[Pattern Detection]
-        RLMAnalysis --> Refactor[Refactoring Suggestions]
-        
-        Classify --> RLMResults[RLM Results]
-        Hidden --> RLMResults
-        Patterns --> RLMResults
-        Refactor --> RLMResults
-    end
-    
-    StaticResults --> Merge[Merge Results]
-    RLMResults --> Merge
-    
-    Merge --> ArchData[(architecture.json<br/>Complete Analysis)]
-    
-    subgraph Phase4["Phase 4: Visualization & Reporting"]
-        ArchData --> Visualizer[visualizer.py<br/>D3.js Generator]
-        ArchData --> Reporter[report_generator.py<br/>HTML Generator]
-        
-        Visualizer --> VizHTML[Interactive Graph<br/>architecture_viz.html]
-        Reporter --> ReportHTML[Analysis Report<br/>report.html]
-    end
-    
-    VizHTML --> Browser([Browser Display])
-    ReportHTML --> Browser
-    
-    style Phase1 fill:#e1f5ff
-    style Phase2 fill:#fff4e1
-    style Phase3 fill:#ffe1f5
-    style Phase4 fill:#e1ffe1
-    style Scanner fill:#4a90e2
-    style GraphBuilder fill:#f5a623
-    style RLMAnalysis fill:#bd10e0
-    style Visualizer fill:#7ed321
-```
+RLM-Codelens supports scanning and analyzing repositories written in multiple languages:
 
-**Static analysis** works on any codebase with zero API calls. Add `--deep` to enable **RLM-powered semantic analysis** that classifies modules, discovers hidden dependencies, and suggests refactoring.
-
-📐 **[View more architecture diagrams →](docs/ARCHITECTURE_DIAGRAMS.md)**
-
-## Proven at Scale
-
-| Repository | Files | LOC | Modules | Import Edges | Cycles | Anti-Patterns |
-|-----------|-------|------|---------|--------------|--------|---------------|
-| **Starlette** | 67 | 9,800 | 67 | 106 | 3 | 4 |
-| **vLLM** | 2,504 | 483,000 | 2,504 | 7,412 | 127 | 89 |
-| **rlm-codelens** (self) | 22 | 3,800 | 22 | 42 | 1 | 3 |
-
-Sample output,reports, visualisation and logs are in [`samples/`](samples/).
+| Language | Parser | Use Case |
+|----------|--------|----------|
+| **Python** | AST (built-in) | Primary focus, full support |
+| **Go** | tree-sitter | Kubernetes, vLLM, etc. |
+| **Java** | tree-sitter | Enterprise codebases |
+| **JavaScript/TypeScript** | tree-sitter | Web apps, Node.js |
+| **Rust** | tree-sitter | Systems programming |
+| **C/C++** | tree-sitter | Performance-critical code |
 
 ## Quick Start
 
@@ -107,54 +38,123 @@ git clone https://github.com/knijesh/rlm-codelens.git
 cd rlm-codelens
 uv sync --extra dev
 
-# Analyze any Python repository in 3 commands
-uv run rlmc scan-repo /path/to/repo --output scan.json
-uv run rlmc analyze-architecture scan.json --output arch.json
-uv run rlmc visualize-arch arch.json
-# Opens interactive visualization in your browser
+# Scan & Analyze in one step (static analysis - no API keys needed)
+uv run rlmc analyze-architecture --repo /path/to/repo
+
+# With RLM deep analysis (requires API key or Ollama)
+uv run rlmc analyze-architecture --repo /path/to/repo --deep --budget 5.0
+
+# Or use Ollama (free, local)
+uv run rlmc analyze-architecture --repo /path/to/repo --ollama --model deepseek-r1:latest
 ```
 
-Or use the pipeline script:
+### Demo (No API Keys Required)
 
 ```bash
-./run_analysis.sh /path/to/repo myproject 
-
-#To Run RLM Analysis Explicitly one shot use the below command
-
- ./run_analysis.sh https://github.com/reponame --deep
-
-# Uses "myproject" as the output name/prefix and generates:
-# - outputs/myproject_viz.html   (interactive visualization)
-# - outputs/myproject_report.html (detailed architecture report)
-```
-
-### Self-Scan Demo (no API keys needed)
-
-```bash
+# Runs self-analysis on rlm-codelens repo - no external dependencies
 ./demo_analysis.sh
 ```
 
-### Deep RLM Analysis (requires API key)
+### Pipeline Script
 
 ```bash
-# Scan with source text included
-uv run rlmc scan-repo /path/to/repo --include-source --output scan.json
+./run_analysis.sh /path/to/repo myproject
 
-# Analyze with RLM-powered insights
-uv run rlmc analyze-architecture scan.json --deep --budget 5.0
+# For RLM deep analysis
+./run_analysis.sh /path/to/repo myproject --deep
 
-# Supports OpenAI and Anthropic backends
-uv run rlmc analyze-architecture scan.json --deep --backend anthropic --model claude-sonnet-4-5-20250929
+# With Ollama (free, local)
+./run_analysis.sh . self --ollama --model qwen3:8b
+
+# Generates:
+# - outputs/myproject_scan.json    (module structure)
+# - outputs/myproject_arch.json    (architecture analysis)
+# - outputs/myproject_viz.html     (interactive graph)
+# - outputs/myproject_report.html  (detailed report)
 ```
+
+## How It Works
+
+```mermaid
+flowchart LR
+    subgraph Input
+        Repo[Repository]
+    end
+
+    subgraph Scanner
+        AST[AST Parser] -->|Extract| Mods[Modules]
+        Mods --> Imports[Imports]
+        Mods --> Classes[Classes/Functions]
+    end
+
+    subgraph Analysis
+        Mods --> Graph[NetworkX Graph]
+        Graph --> Cycles[Cycle Detection]
+        Graph --> Layers[Layer Classification]
+        Graph --> Hubs[Hub Detection]
+        Graph --> Anti[Anti-Patterns]
+    end
+
+    subgraph DeepAnalysis["--deep (Optional)"]
+        Graph --> RLMApi[RLM API]
+        RLMApi --> Classify[Semantic Classification]
+        RLMApi --> Hidden[Hidden Dependencies]
+        RLMApi --> Patterns[Pattern Detection]
+    end
+
+    subgraph Output
+        Graph --> Viz[Interactive D3.js]
+        Graph --> Report[HTML Report]
+    end
+```
+
+**Static analysis** works on any codebase with zero API calls. Add `--deep` for **RLM-powered** semantic analysis.
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `rlmc scan-repo <path>` | Parse all Python files using AST; extract imports, classes, functions (supports `--name <label>` to tag the analysis/output prefix) |
-| `rlmc analyze-architecture <scan.json>` | Build dependency graph, detect cycles, layers, anti-patterns |
-| `rlmc visualize-arch <analysis.json>` | Generate interactive D3.js visualization |
-| `rlmc generate-report <analysis.json>` | Generate standalone HTML architecture report |
+| `rlmc scan-repo <path>` | Scan repository, extract module structure |
+| `rlmc analyze-architecture [scan.json]` | Static analysis (cycles, layers, anti-patterns) |
+| `rlmc analyze-architecture --repo <path>` | Scan + analyze in one step |
+| `rlmc analyze-architecture [scan.json] --deep` | RLM-powered deep analysis |
+| `rlmc analyze-architecture [scan.json] --ollama` | Local Ollama for deep analysis |
+| `rlmc list-models` | List available Ollama models |
+| `rlmc visualize-arch <arch.json>` | Interactive D3.js visualization |
+| `rlmc generate-report <arch.json>` | HTML architecture report |
+
+### Key Flags
+
+| Flag | Description |
+|------|-------------|
+| `--deep` | Enable RLM semantic analysis |
+| `--ollama` | Use local Ollama (free) |
+| `--budget <$>` | RLM API budget limit in USD (default: $10, env: $50) |
+| `--model <name>` | Model to use (gpt-4o, claude-sonnet-4, deepseek-r1, etc.) |
+| `--include-source` | Include source code for deeper analysis |
+
+## Proven at Scale
+
+RLM-Codelens has been tested on real-world repositories:
+
+| Repository | Language | Files | LOC | Import Edges | Cycles | Anti-Patterns |
+|------------|----------|-------|-----|--------------|--------|---------------|
+| **Kubernetes** | Go | 2,700+ | 2M+ | 15,000+ | 89 | 156 |
+| **Kubernetes Java Client** | Java | 3,017 | 580K | 8,200+ | 34 | 67 |
+| **vLLM** | Python | 2,504 | 483K | 7,412 | 127 | 89 |
+| **rlm-codelens** | Python | 23 | 6,800 | 17 | 0 | 3 |
+
+## Sample Reports
+
+Analysis reports from real-world repositories:
+
+| Repository | Language | Files | Report | Visualization |
+|------------|----------|-------|--------|---------------|
+| **Kubernetes** | Go | 2,700+ | [kubernetes_report.html](samples/kubernetes_report.html) | [kubernetes_viz.html](samples/kubernetes_viz.html) |
+| **Kubernetes Java Client** | Java | 3,017 | [java_report.html](samples/java_report.html) | [java_viz.html](samples/java_viz.html) |
+| **rlm-codelens** | Python | 23 | [self_report.html](samples/self_report.html) | [self_viz.html](samples/self_viz.html) |
+
+> **Latest run outputs:** [samples/](samples/)
 
 ## Configuration
 
@@ -162,13 +162,15 @@ Create a `.env` file (see `.env.example`):
 
 ```env
 # Required only for --deep RLM analysis
-OPENAI_API_KEY=sk-xxxxxxxxxxxx    # if using openai backend
-# ANTHROPIC_API_KEY=sk-ant-xxx    # if using anthropic backend
+OPENAI_API_KEY=sk-xxxxxxxxxxxx
+
+# Or use Anthropic
+# ANTHROPIC_API_KEY=sk-ant-xxx
 
 # Optional defaults
-RLM_BACKEND=openai
-RLM_MODEL=gpt-4o
-BUDGET_LIMIT=50.0
+RLM_BACKEND=openai          # "openai" or "anthropic"
+RLM_MODEL=gpt-4o            # Model for deep analysis
+BUDGET_LIMIT=50.0            # Max spend in USD (CLI --budget overrides this)
 ```
 
 ## Project Structure
@@ -177,19 +179,23 @@ BUDGET_LIMIT=50.0
 rlm-codelens/
 ├── src/rlm_codelens/
 │   ├── cli.py                    # CLI entry point (rlmc)
-│   ├── commands.py               # Command implementations
-│   ├── config.py                 # Configuration from .env
-│   ├── repo_scanner.py           # AST-based repository scanner
-│   ├── codebase_graph.py         # Module dependency graph builder
-│   ├── architecture_analyzer.py  # RLM-powered deep analysis
-│   ├── visualizer.py             # D3.js visualization generator
-│   └── utils/                    # Cost tracking, logging
+│   ├── commands.py                # Command implementations
+│   ├── config.py                  # Configuration from .env
+│   ├── repo_scanner.py            # Multi-language repository scanner
+│   ├── language_support.py        # Tree-sitter grammar loading & language detection
+│   ├── codebase_graph.py          # Module dependency graph builder
+│   ├── architecture_analyzer.py   # RLM-powered deep analysis
+│   ├── visualizer.py              # D3.js visualization generator
+│   ├── report_generator.py        # HTML report generator
+│   └── utils/
+│       ├── cost_tracker.py        # RLM API cost tracking & budget enforcement
+│       └── secure_logging.py      # Redacted logging for API keys
 ├── tests/
-│   └── unit/                     # Unit tests
-├── outputs/examples/             # Pre-computed analysis results
-├── visualization/                # Standalone HTML viewer
-├── run_analysis.sh               # Architecture analysis pipeline
-├── demo_analysis.sh              # Self-scan demo
+│   ├── unit/                      # Unit tests
+│   └── integration/               # Integration tests
+├── samples/                       # Latest analysis outputs
+├── run_analysis.sh                # Full pipeline script
+├── demo_analysis.sh               # Self-scan demo
 └── pyproject.toml
 ```
 
@@ -201,9 +207,6 @@ uv run pytest tests/ -v
 
 # Unit tests only
 uv run pytest tests/unit/ -v
-
-# With coverage
-uv run pytest tests/ --cov=rlm_codelens --cov-report=html
 ```
 
 ## Python API
@@ -225,20 +228,6 @@ print(f"{len(analysis.anti_patterns)} anti-patterns")
 # Save
 analysis.save("architecture.json")
 ```
-# Sample Output
-
-### Analysis Report (with `--deep` RLM analysis)
-
-<img src="samples/RLM_sample.png" width="500"/>
-
-<img src="samples/RLM_Sample_2.png" width="500"/>
-
-> **View the full HTML report:** [kubernetes_report.html](https://htmlpreview.github.io/?https://github.com/knijesh/rlm-codelens/blob/main/samples/kubernetes_report.html)
-
-### Interactive Architecture Visualization
-
-> **View the full interactive visualization:** [kubernetes_viz.html](https://htmlpreview.github.io/?https://github.com/knijesh/rlm-codelens/blob/main/samples/kubernetes_viz.html)
-
 
 ## Contributing
 

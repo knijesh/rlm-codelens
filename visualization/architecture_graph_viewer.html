@@ -208,6 +208,11 @@
             <h3>Layers</h3>
             <div id="layerFilters"></div>
 
+            <div id="languageFilterSection" style="display:none;">
+                <h3 style="margin-top:12px;">Languages</h3>
+                <div id="languageFilters"></div>
+            </div>
+
             <div class="section-header" id="hubHeader">
                 <span class="section-toggle open">&#9654;</span>
                 <h3>Hub Modules</h3>
@@ -264,8 +269,10 @@ let allNodes = [], allLinks = [], allCycles = [], allAntiPatterns = [];
 let nodeMap = {};
 let simulation, svg, g, linkGroup, nodeGroup, labelGroup;
 let activeFilters = new Set(Object.keys(LAYER_COLORS));
+let activeLanguages = new Set();
 let selectedNode = null;
 let zoomBehavior;
+let currentZoomScale = 0.7;
 
 function init() {
     const data = typeof EMBEDDED_DATA !== "undefined" ? EMBEDDED_DATA : null;
@@ -284,8 +291,12 @@ function init() {
     // Build node map
     allNodes.forEach(n => { nodeMap[n.id] = n; });
 
+    // Detect languages present in the dataset
+    allNodes.forEach(n => activeLanguages.add(n.language || "python"));
+
     renderStats(data);
     renderLayerFilters();
+    renderLanguageFilters();
     renderHubModules(data.hub_modules || []);
     renderAntiPatterns(allAntiPatterns);
     renderCycles(allCycles);
@@ -306,9 +317,15 @@ function renderStats(data) {
     if (cycleCount > 5 || highAp > 3) { healthClass = "health-red"; healthText = "Needs Attention"; }
     else if (cycleCount > 0 || highAp > 0) { healthClass = "health-yellow"; healthText = "Minor Issues"; }
 
+    // Detect languages
+    const langSet = new Set();
+    (data.graph_data?.nodes || []).forEach(n => langSet.add(n.language || "python"));
+    const langCount = langSet.size;
+
     const stats = [
         { label: "Modules", value: data.total_modules || 0 },
         { label: "Edges", value: data.total_edges || 0 },
+        { label: "Languages", value: langCount },
         { label: "Cycles", value: cycleCount },
         { label: "Hub Modules", value: (data.hub_modules || []).length },
         { label: "Anti-Patterns", value: apCount },
@@ -339,6 +356,40 @@ function renderLayerFilters() {
         cb.addEventListener("change", () => {
             if (cb.checked) activeFilters.add(cb.dataset.layer);
             else activeFilters.delete(cb.dataset.layer);
+            applyFilters();
+        });
+    });
+}
+
+const LANG_COLORS = {
+    python: "#3572A5", go: "#00ADD8", java: "#B07219",
+    javascript: "#F1E05A", typescript: "#3178C6", rust: "#DEA584",
+    cpp: "#F34B7D", c: "#555555",
+};
+
+function renderLanguageFilters() {
+    // Only show if more than one language
+    if (activeLanguages.size <= 1) return;
+    document.getElementById("languageFilterSection").style.display = "";
+
+    const counts = {};
+    allNodes.forEach(n => { const lang = n.language || "python"; counts[lang] = (counts[lang] || 0) + 1; });
+
+    const container = document.getElementById("languageFilters");
+    container.innerHTML = Array.from(activeLanguages).sort().map(lang => {
+        const color = LANG_COLORS[lang] || "#bdbdbd";
+        return `<label class="layer-filter">
+            <input type="checkbox" checked data-lang="${lang}">
+            <span class="layer-dot" style="background:${color}"></span>
+            <span>${lang}</span>
+            <span class="layer-count">${counts[lang] || 0}</span>
+        </label>`;
+    }).join("");
+
+    container.querySelectorAll("input").forEach(cb => {
+        cb.addEventListener("change", () => {
+            if (cb.checked) activeLanguages.add(cb.dataset.lang);
+            else activeLanguages.delete(cb.dataset.lang);
             applyFilters();
         });
     });
@@ -402,7 +453,7 @@ function setupSidebarToggles() {
 }
 
 function shortName(path) {
-    return (path || "").split("/").pop().replace(".py", "");
+    return (path || "").split("/").pop().replace(/\.(py|go|java|ts|tsx|js|jsx|rs|cpp|cc|c|h|hpp)$/, "");
 }
 
 function buildGraph() {
@@ -413,8 +464,12 @@ function buildGraph() {
     svg = d3.select("#graphSvg");
     svg.selectAll("*").remove();
 
-    // Zoom
-    zoomBehavior = d3.zoom().scaleExtent([0.05, 8]).on("zoom", e => g.attr("transform", e.transform));
+    // Zoom with semantic label visibility
+    zoomBehavior = d3.zoom().scaleExtent([0.05, 8]).on("zoom", e => {
+        g.attr("transform", e.transform);
+        currentZoomScale = e.transform.k;
+        updateLabelVisibility();
+    });
     svg.call(zoomBehavior);
 
     // Click on empty space to deselect
@@ -453,11 +508,21 @@ function buildGraph() {
     svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(width / 2, height / 2).scale(0.7));
 }
 
+function updateLabelVisibility() {
+    // For large graphs, hide labels when zoomed out to improve performance
+    const nodeCount = allNodes.length;
+    if (nodeCount > 500) {
+        const showLabels = currentZoomScale > 0.3;
+        labelGroup.style("display", showLabels ? null : "none");
+    }
+}
+
 function applyFilters() {
     const query = (document.getElementById("searchInput").value || "").toLowerCase();
 
     const visibleNodes = allNodes.filter(n => {
         if (!activeFilters.has(n.layer)) return false;
+        if (!activeLanguages.has(n.language || "python")) return false;
         if (query && !n.id.toLowerCase().includes(query) && !(n.package || "").toLowerCase().includes(query)) return false;
         return true;
     });
@@ -568,13 +633,21 @@ function updateGraph(nodes, links) {
         .on("end", (event, d) => { if (!event.active && simulation) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
     );
 
-    // Simulation with layer-based Y positioning
+    // Simulation with layer-based Y positioning — adapt for repo size
     if (simulation) simulation.stop();
+    const isLargeRepo = nodes.length > 500;
+    const chargeStrength = isLargeRepo ? -80 : -250;
+    const linkDistance = isLargeRepo ? 40 : 90;
+    const linkStrength = isLargeRepo ? 0.3 : 0.5;
+    const collisionPad = isLargeRepo ? 2 : 5;
+    const alphaDecay = isLargeRepo ? 0.05 : 0.0228; // faster convergence for large repos
+
     simulation = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id(d => d.id).distance(90).strength(0.5))
-        .force("charge", d3.forceManyBody().strength(-250))
+        .alphaDecay(alphaDecay)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(linkDistance).strength(linkStrength))
+        .force("charge", d3.forceManyBody().strength(chargeStrength).theta(isLargeRepo ? 0.9 : 0.8))
         .force("center", d3.forceCenter(0, 0))
-        .force("collision", d3.forceCollide().radius(d => rScale(d.loc || 1) + 5))
+        .force("collision", d3.forceCollide().radius(d => rScale(d.loc || 1) + collisionPad))
         .force("layerY", d3.forceY(d => {
             const order = LAYER_ORDER[d.layer] !== undefined ? LAYER_ORDER[d.layer] : 3;
             return (order - 2.5) * (height / 5);
@@ -597,6 +670,7 @@ function showTooltip(event, d) {
     tt.style.display = "block";
     tt.innerHTML = `
         <div class="tt-title">${d.id}</div>
+        <div class="tt-row"><span class="tt-key">Language</span><span class="tt-val">${d.language || "python"}</span></div>
         <div class="tt-row"><span class="tt-key">Layer</span><span class="tt-val">${d.layer}</span></div>
         <div class="tt-row"><span class="tt-key">LOC</span><span class="tt-val">${d.loc}</span></div>
         <div class="tt-row"><span class="tt-key">Fan-in</span><span class="tt-val">${d.fan_in}</span></div>
@@ -647,6 +721,7 @@ function buildTracerContent(d) {
     html += `<div class="tracer-section">
         <h4>Module Info</h4>
         <div class="tracer-row"><span class="key">Path</span><span class="val" style="font-size:10px;word-break:break-all;">${d.id}</span></div>
+        <div class="tracer-row"><span class="key">Language</span><span class="val">${d.language || "python"}</span></div>
         <div class="tracer-row"><span class="key">Layer</span><span class="val"><span class="layer-badge" style="background:${layerColor};color:#000;">${d.layer}</span></span></div>
         <div class="tracer-row"><span class="key">LOC</span><span class="val">${d.loc || 0}</span></div>
         <div class="tracer-row"><span class="key">Classes</span><span class="val">${d.num_classes || 0}</span></div>

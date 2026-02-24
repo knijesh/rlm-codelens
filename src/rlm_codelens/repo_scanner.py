@@ -1,8 +1,10 @@
 """
 Repository scanner for codebase architecture analysis.
 
-Scans a local or remote repository, parsing Python files with AST to extract
-module structure, imports, classes, functions, and entry points.
+Scans a local or remote repository, parsing source files to extract module
+structure, imports, classes, functions, and entry points.  Supports Python
+(via built-in ast), and Go, Java, Rust, C/C++, TypeScript/JavaScript (via
+tree-sitter when installed).
 
 Example:
     >>> scanner = RepositoryScanner("/path/to/repo")
@@ -34,6 +36,14 @@ DEFAULT_EXCLUDE_PATTERNS = {
     ".pytest_cache",
     ".ruff_cache",
     ".eggs",
+    "vendor",  # Go vendored deps
+    "target",  # Rust/Java build output
+    "bin",  # compiled binaries
+    "obj",  # C/C++ object files
+    ".gradle",
+    ".idea",
+    ".vscode",
+    "testdata",  # Go test fixtures (data, not code)
 }
 
 # Suffixes for egg-info dirs
@@ -42,7 +52,7 @@ EXCLUDE_SUFFIXES = (".egg-info",)
 
 @dataclass
 class ModuleInfo:
-    """Information extracted from a single Python module.
+    """Information extracted from a single source module.
 
     Attributes:
         path: Relative path from repo root
@@ -55,6 +65,7 @@ class ModuleInfo:
         docstring: Module-level docstring
         is_test: Whether this appears to be a test file
         source: Full source text (included when include_source=True)
+        language: Programming language (e.g., "python", "go", "java")
     """
 
     path: str
@@ -67,6 +78,7 @@ class ModuleInfo:
     docstring: Optional[str] = None
     is_test: bool = False
     source: Optional[str] = None
+    language: str = "python"
 
 
 @dataclass
@@ -126,7 +138,10 @@ class RepositoryStructure:
 
 
 class RepositoryScanner:
-    """Scans a repository and extracts Python module structure via AST parsing.
+    """Scans a repository and extracts module structure via AST/tree-sitter parsing.
+
+    Supports Python (built-in ast), and Go, Java, Rust, C/C++, TypeScript/
+    JavaScript via tree-sitter when the corresponding grammar is installed.
 
     Args:
         repo_path: Local path or remote git URL
@@ -143,6 +158,7 @@ class RepositoryScanner:
         self.original_path = repo_path
         self.include_source = include_source
         self._temp_dir: Optional[str] = None
+        self._ts_parsers: Dict[str, Any] = {}  # cached UniversalParser instances
 
         # Merge exclude patterns
         self.exclude_patterns = set(DEFAULT_EXCLUDE_PATTERNS)
@@ -165,12 +181,22 @@ class RepositoryScanner:
         """Shallow-clone a remote repository to a temporary directory."""
         self._temp_dir = tempfile.mkdtemp(prefix="rlmc_scan_")
         clone_path = Path(self._temp_dir) / "repo"
-        subprocess.run(
-            ["git", "clone", "--depth", "1", url, str(clone_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", url, str(clone_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.cleanup()
+            raise RuntimeError(f"Git clone timed out after 300s: {url}")
+        except subprocess.CalledProcessError as e:
+            self.cleanup()
+            raise RuntimeError(
+                f"Git clone failed for {url}: {e.stderr.strip() if e.stderr else e}"
+            )
         return clone_path
 
     def cleanup(self) -> None:
@@ -192,21 +218,29 @@ class RepositoryScanner:
 
     def _do_scan(self) -> RepositoryStructure:
         """Internal scan implementation."""
+        from rlm_codelens.language_support import EXTENSIONS, detect_language
+
         structure = RepositoryStructure(
             root_path=str(self.repo_path),
             name=self.repo_path.name,
         )
 
-        # Find all Python files
-        py_files = self._find_python_files()
+        # Find all supported source files
+        source_files = self._find_source_files(set(EXTENSIONS.keys()))
 
-        # Detect packages
+        # Detect packages (Python-specific but harmless for other langs)
         structure.packages = self._detect_packages()
 
         # Parse each file
-        for py_file in py_files:
-            rel_path = str(py_file.relative_to(self.repo_path))
-            module_info = self._parse_module(py_file, rel_path)
+        for src_file in source_files:
+            rel_path = str(src_file.relative_to(self.repo_path))
+            lang = detect_language(rel_path)
+            if lang == "python":
+                module_info = self._parse_module(src_file, rel_path)
+            else:
+                module_info = self._parse_module_treesitter(
+                    src_file, rel_path, lang or "unknown"
+                )
             if module_info:
                 structure.modules[rel_path] = module_info
                 structure.total_lines += module_info.lines_of_code
@@ -216,7 +250,7 @@ class RepositoryScanner:
         # Detect entry points
         structure.entry_points = self._detect_entry_points()
 
-        # Resolve relative imports
+        # Resolve relative imports (Python only)
         self._resolve_relative_imports(structure)
 
         return structure
@@ -238,6 +272,16 @@ class RepositoryScanner:
             if not self._should_exclude(rel):
                 py_files.append(py_file)
         return sorted(py_files)
+
+    def _find_source_files(self, extensions: set) -> List[Path]:
+        """Find all source files matching the given extensions."""
+        files = []
+        for path in self.repo_path.rglob("*"):
+            if path.is_file() and path.suffix.lower() in extensions:
+                rel = path.relative_to(self.repo_path)
+                if not self._should_exclude(rel):
+                    files.append(path)
+        return sorted(files)
 
     def _detect_packages(self) -> List[str]:
         """Detect Python packages (directories with __init__.py)."""
@@ -329,6 +373,68 @@ class RepositoryScanner:
 
         return module_info
 
+    def _get_ts_parser(self, language: str) -> Optional[Any]:
+        """Get or create a cached UniversalParser for the given language."""
+        if language not in self._ts_parsers:
+            from rlm_codelens.language_support import UniversalParser
+
+            parser = UniversalParser(language)
+            self._ts_parsers[language] = parser if parser.available else None
+        return self._ts_parsers[language]
+
+    def _parse_module_treesitter(
+        self, file_path: Path, rel_path: str, language: str
+    ) -> Optional[ModuleInfo]:
+        """Parse a non-Python source file using tree-sitter.
+
+        Returns None if tree-sitter is not available for this language.
+        """
+        parser = self._get_ts_parser(language)
+        if parser is None:
+            # No tree-sitter grammar -- create a minimal ModuleInfo with just LOC
+            try:
+                source = file_path.read_text(encoding="utf-8", errors="replace")
+            except (OSError, UnicodeDecodeError):
+                return None
+            return ModuleInfo(
+                path=rel_path,
+                package=self._path_to_package(rel_path),
+                lines_of_code=source.count("\n") + 1,
+                is_test=self._is_test_file(rel_path),
+                source=source if self.include_source else None,
+                language=language,
+            )
+
+        try:
+            source = file_path.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+        parsed = parser.parse_module(source, rel_path, self.include_source)
+        if parsed is None:
+            return ModuleInfo(
+                path=rel_path,
+                package=self._path_to_package(rel_path),
+                lines_of_code=source.count("\n") + 1,
+                is_test=self._is_test_file(rel_path),
+                source=source if self.include_source else None,
+                language=language,
+            )
+
+        return ModuleInfo(
+            path=rel_path,
+            package=self._path_to_package(rel_path),
+            imports=parsed.get("imports", []),
+            from_imports=parsed.get("from_imports", []),
+            classes=parsed.get("classes", []),
+            functions=parsed.get("functions", []),
+            lines_of_code=parsed.get("lines_of_code", 0),
+            docstring=parsed.get("docstring"),
+            is_test=self._is_test_file(rel_path),
+            source=parsed.get("source"),
+            language=language,
+        )
+
     def _node_to_str(self, node: ast.AST) -> str:
         """Convert an AST node to a readable string representation."""
         if isinstance(node, ast.Name):
@@ -360,8 +466,13 @@ class RepositoryScanner:
         return (
             "tests" in parts
             or "test" in parts
+            or "testdata" in parts
+            or "__tests__" in parts
             or name.startswith("test_")
             or name.endswith("_test")
+            or name.endswith("Test")  # Java: FooTest.java
+            or name.endswith(".test")  # JS: foo.test.ts
+            or name.endswith(".spec")  # JS: foo.spec.ts
             or name == "conftest"
         )
 

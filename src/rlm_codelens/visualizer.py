@@ -144,9 +144,11 @@ def generate_architecture_visualization(
     analysis_data = _enrich_analysis_data(analysis_data)
 
     # Inject data before </head>
+    # Escape </script> in JSON to prevent breaking out of the script tag
+    json_data = json.dumps(analysis_data, indent=2).replace("</", "<\\/")
     data_script = f"""
     <script>
-        const EMBEDDED_DATA = {json.dumps(analysis_data, indent=2)};
+        const EMBEDDED_DATA = {json_data};
     </script>
     """
     html_content = html_content.replace("</head>", f"{data_script}</head>")

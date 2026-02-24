@@ -10,23 +10,42 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+def _has_data(val: Any) -> bool:
+    """Return True if val is present and non-empty (not None, {}, or [])."""
+    if val is None:
+        return False
+    if isinstance(val, (dict, list)) and len(val) == 0:
+        return False
+    return True
+
+
 def _health_rating(data: Dict[str, Any]) -> tuple:
     """Compute a health rating (label, color, explanation) from analysis data."""
     penalty = 0
 
-    # Circular dependencies are the worst
+    # Circular dependencies — capped so large repos aren't auto-critical
     cycles = data.get("cycles", [])
-    penalty += len(cycles) * 15
+    penalty += min(len(cycles) * 15, 40)
 
-    # Anti-patterns by severity
+    # Anti-patterns by severity — cap each severity tier so heuristic-based
+    # detections don't overwhelm the score in large repos.
+    # "info" severity carries zero penalty (purely informational).
+    high_penalty = 0
+    medium_penalty = 0
+    low_penalty = 0
     for ap in data.get("anti_patterns", []):
         sev = ap.get("severity", "low")
         if sev == "high":
-            penalty += 10
+            high_penalty += 10
         elif sev == "medium":
-            penalty += 5
+            medium_penalty += 5
+        elif sev == "info":
+            pass  # no penalty for informational items
         else:
-            penalty += 2
+            low_penalty += 2
+    penalty += min(high_penalty, 30)  # cap god modules at 30
+    penalty += min(medium_penalty, 20)  # cap layer violations at 20
+    penalty += min(low_penalty, 10)  # cap orphan-like penalties at 10
 
     # Normalize: 0 penalty = 100 score, cap at 0
     score = max(0, 100 - penalty)
@@ -121,11 +140,29 @@ def _module_short(path: str) -> str:
 
 def _build_summary_section(data: Dict[str, Any], health: tuple) -> str:
     total_loc = 0
+    lang_counts: Dict[str, int] = {}
     for node in data.get("graph_data", {}).get("nodes", []):
         total_loc += node.get("loc", 0)
+        lang = node.get("language", "unknown")
+        lang_counts[lang] = lang_counts.get(lang, 0) + 1
 
     label, color, score, _ = health
     badge = f'<span class="badge" style="background:{color};color:#000">{label} ({score}/100)</span>'
+
+    # Language badges
+    lang_html = ""
+    if lang_counts:
+        sorted_langs = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)
+        lang_badges = " ".join(
+            f'<span class="badge" style="background:#334155;color:#e2e8f0">'
+            f"{_escape(lang.capitalize())} ({count:,})</span>"
+            for lang, count in sorted_langs
+        )
+        lang_html = f"""
+        <div class="card">
+          <div class="stat-label">Languages</div>
+          <div style="margin-top:4px">{lang_badges}</div>
+        </div>"""
 
     return f"""
     <section id="summary">
@@ -141,11 +178,11 @@ def _build_summary_section(data: Dict[str, Any], health: tuple) -> str:
         </div>
         <div class="card">
           <div class="stat-label">Modules</div>
-          <div class="stat-value">{data.get("total_modules", 0)}</div>
+          <div class="stat-value">{data.get("total_modules", 0):,}</div>
         </div>
         <div class="card">
           <div class="stat-label">Import Edges</div>
-          <div class="stat-value">{data.get("total_edges", 0)}</div>
+          <div class="stat-value">{data.get("total_edges", 0):,}</div>
         </div>
         <div class="card">
           <div class="stat-label">Total LOC</div>
@@ -155,13 +192,32 @@ def _build_summary_section(data: Dict[str, Any], health: tuple) -> str:
           <div class="stat-label">Circular Dependencies</div>
           <div class="stat-value">{len(data.get("cycles", []))}</div>
         </div>
+        {lang_html}
       </div>
     </section>"""
 
 
-def _build_health_section(health: tuple) -> str:
+def _build_health_section(health: tuple, data: Dict[str, Any] | None = None) -> str:
     label, color, score, explanation = health
     bar_width = score
+
+    resolution_note = ""
+    if data:
+        total_modules = data.get("total_modules", 0)
+        if total_modules > 0:
+            nodes = data.get("graph_data", {}).get("nodes", [])
+            connected = sum(
+                1 for n in nodes if n.get("fan_in", 0) > 0 or n.get("fan_out", 0) > 0
+            )
+            resolution_rate = connected / total_modules
+            if resolution_rate < 0.5:
+                pct = resolution_rate * 100
+                resolution_note = (
+                    f'<p style="color:#60a5fa;font-size:0.85em;margin-top:8px">'
+                    f"Import resolution coverage: {pct:.0f}%. Health score may not "
+                    f"fully reflect the codebase. Install language grammars for "
+                    f"more accurate analysis.</p>"
+                )
 
     return f"""
     <section id="health">
@@ -176,9 +232,11 @@ def _build_health_section(health: tuple) -> str:
         </div>
         <p style="margin-top:12px;color:#cbd5e1">{explanation}</p>
         <p style="color:#94a3b8;font-size:0.85em;margin-top:8px">
-          Scoring: starts at 100, penalised &minus;15 per circular dependency,
-          &minus;10 per high-severity anti-pattern, &minus;5 per medium, &minus;2 per low.
+          Scoring: starts at 100. Penalties capped per category &mdash;
+          cycles (max &minus;40), high anti-patterns (max &minus;30),
+          medium (max &minus;20), low (max &minus;10).
         </p>
+        {resolution_note}
       </div>
     </section>"""
 
@@ -290,50 +348,152 @@ def _build_antipatterns_section(data: Dict[str, Any]) -> str:
         "orphan": "A module with no incoming or outgoing dependencies. It may be dead code or missing integration.",
         "layer_violation": "A module in a lower layer imports from a higher layer, breaking the dependency rule.",
         "unstable_dependency": "A stable module depends on an unstable one, creating fragile foundations.",
+        "import_resolution_limited": "Import resolution could not resolve all module dependencies for this language.",
     }
 
-    severity_order = {"high": 0, "medium": 1, "low": 2}
-    patterns_sorted = sorted(
-        patterns, key=lambda p: severity_order.get(p.get("severity", "low"), 3)
-    )
+    severity_colors = {
+        "high": "#ef4444",
+        "medium": "#fb923c",
+        "low": "#facc15",
+        "info": "#60a5fa",
+    }
 
-    severity_colors = {"high": "#ef4444", "medium": "#fb923c", "low": "#facc15"}
-
-    items = ""
-    for ap in patterns_sorted:
-        sev = ap.get("severity", "low")
-        color = severity_colors.get(sev, "#94a3b8")
-        ap_type = ap.get("type", "unknown")
-        explanation = type_explanations.get(ap_type, "")
-        details = _escape(ap.get("details", ""))
-
-        items += f"""
-        <div class="ap-item">
-          <div class="ap-header">
-            <span class="badge" style="background:{color};color:#000">{sev.upper()}</span>
-            <strong>{_escape(ap_type)}</strong>
-            <span style="color:#94a3b8">&mdash; {_escape(ap.get("module", ""))}</span>
-          </div>
-          <p class="ap-details">{details}</p>
-          {"<p class='ap-explain'>" + explanation + "</p>" if explanation else ""}
-        </div>"""
-
+    # Count by severity
     high_count = sum(1 for p in patterns if p.get("severity") == "high")
     med_count = sum(1 for p in patterns if p.get("severity") == "medium")
     low_count = sum(1 for p in patterns if p.get("severity") == "low")
+    info_count = sum(1 for p in patterns if p.get("severity") == "info")
+    actionable_count = high_count + med_count + low_count
+
+    # Filter pills
+    filter_pills = f"""
+      <div class="filter-bar">
+        <span class="filter-pill active" data-severity="all">All ({actionable_count})</span>
+        <span class="filter-pill" data-severity="high" style="border-color:#ef4444">High ({high_count})</span>
+        <span class="filter-pill" data-severity="medium" style="border-color:#fb923c">Medium ({med_count})</span>
+        <span class="filter-pill" data-severity="low" style="border-color:#facc15">Low ({low_count})</span>
+      </div>"""
+
+    # Separate info items
+    info_patterns = [p for p in patterns if p.get("severity") == "info"]
+    actionable_patterns = [p for p in patterns if p.get("severity") != "info"]
+
+    # Group by type
+    groups: Dict[str, list] = {}
+    for ap in actionable_patterns:
+        ap_type = ap.get("type", "unknown")
+        groups.setdefault(ap_type, []).append(ap)
+
+    # Sort groups: highest max severity first, then by count descending
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+
+    def group_sort_key(item: tuple) -> tuple:
+        _, items = item
+        max_sev = min(severity_order.get(p.get("severity", "low"), 2) for p in items)
+        return (max_sev, -len(items))
+
+    sorted_groups = sorted(groups.items(), key=group_sort_key)
+
+    # Build accordion groups
+    cap_per_group = 10
+    groups_html = ""
+    for ap_type, items in sorted_groups:
+        max_sev = "low"
+        for p in items:
+            s = p.get("severity", "low")
+            if severity_order.get(s, 2) < severity_order.get(max_sev, 2):
+                max_sev = s
+        max_sev_color = severity_colors.get(max_sev, "#94a3b8")
+        start_open = max_sev == "high"
+        open_class = " open" if start_open else ""
+
+        explanation = type_explanations.get(ap_type, "")
+        explain_html = (
+            f'<p class="ap-explain" style="margin-bottom:8px">{explanation}</p>'
+            if explanation
+            else ""
+        )
+
+        items_html = ""
+        for i, ap in enumerate(items):
+            sev = ap.get("severity", "low")
+            color = severity_colors.get(sev, "#94a3b8")
+            details = _escape(ap.get("details", ""))
+            hidden_class = " hidden-item" if i >= cap_per_group else ""
+            hidden_style = ' style="display:none"' if i >= cap_per_group else ""
+            items_html += f"""
+            <div class="ap-item{hidden_class}" data-severity="{sev}"{hidden_style}>
+              <div class="ap-header">
+                <span class="badge" style="background:{color};color:#000">{sev.upper()}</span>
+                <span style="color:#94a3b8">{_escape(ap.get("module", ""))}</span>
+              </div>
+              <p class="ap-details">{details}</p>
+            </div>"""
+
+        show_more_html = ""
+        if len(items) > cap_per_group:
+            show_more_html = f'<button class="show-more-btn" style="background:none;border:1px solid #475569;color:#60a5fa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.85em;margin-top:8px">Show all {len(items)}</button>'
+
+        groups_html += f"""
+        <div class="ap-group">
+          <div class="ap-group-header{open_class}">
+            <span class="chevron">&#9654;</span>
+            <strong>{_escape(ap_type)}</strong>
+            <span class="badge" style="background:{max_sev_color};color:#000;font-size:0.75em">{max_sev.upper()}</span>
+            <span style="color:#94a3b8;font-size:0.85em">({len(items)})</span>
+          </div>
+          <div class="ap-group-body{open_class}">
+            {explain_html}
+            <div class="ap-group-items">
+              {items_html}
+            </div>
+            {show_more_html}
+          </div>
+        </div>"""
+
+    # Info items rendered as a separate callout box
+    info_html = ""
+    if info_patterns:
+        info_items = ""
+        for ap in info_patterns:
+            details = _escape(ap.get("details", ""))
+            ap_type = ap.get("type", "unknown")
+            explanation = type_explanations.get(ap_type, "")
+            info_items += f"""
+            <div style="margin-bottom:8px">
+              <span class="badge" style="background:#60a5fa;color:#000">INFO</span>
+              <strong style="margin-left:6px">{_escape(ap_type)}</strong>
+              <p class="ap-details" style="margin-top:4px">{details}</p>
+              {"<p class='ap-explain'>" + explanation + "</p>" if explanation else ""}
+            </div>"""
+        info_html = f"""
+        <div class="card" style="margin-top:16px;border-color:#60a5fa;background:#1a2744">
+          <p style="color:#60a5fa;font-weight:600;margin-bottom:8px">Informational Notes</p>
+          {info_items}
+        </div>"""
+
+    summary_parts = []
+    if high_count:
+        summary_parts.append(f'<span style="color:#ef4444">{high_count} high</span>')
+    if med_count:
+        summary_parts.append(f'<span style="color:#fb923c">{med_count} medium</span>')
+    if low_count:
+        summary_parts.append(f'<span style="color:#facc15">{low_count} low</span>')
+    if info_count:
+        summary_parts.append(f'<span style="color:#60a5fa">{info_count} info</span>')
+    summary_str = ", ".join(summary_parts)
 
     return f"""
     <section id="antipatterns">
       <h2>Anti-Patterns</h2>
       <div class="card">
         <p style="color:#94a3b8;margin-bottom:12px">
-          {len(patterns)} anti-pattern{"s" if len(patterns) != 1 else ""} found:
-          <span style="color:#ef4444">{high_count} high</span>,
-          <span style="color:#fb923c">{med_count} medium</span>,
-          <span style="color:#facc15">{low_count} low</span>.
+          {actionable_count} anti-pattern{"s" if actionable_count != 1 else ""} found{" (" + summary_str + ")" if summary_str else ""}.
         </p>
-        {items}
+        {filter_pills}
+        {groups_html}
       </div>
+      {info_html}
     </section>"""
 
 
@@ -354,12 +514,12 @@ def _build_layers_section(data: Dict[str, Any]) -> str:
     max_count = max(layer_counts.values()) if layer_counts else 1
 
     layer_colors = {
-        "presentation": "#60a5fa",
-        "application": "#a78bfa",
-        "domain": "#4ade80",
-        "infrastructure": "#fb923c",
-        "utility": "#94a3b8",
-        "config": "#facc15",
+        "data": "#42a5f5",
+        "business": "#66bb6a",
+        "api": "#ffa726",
+        "util": "#bdbdbd",
+        "test": "#ab47bc",
+        "config": "#ffee58",
     }
 
     bars = ""
@@ -385,7 +545,7 @@ def _build_layers_section(data: Dict[str, Any]) -> str:
 def _deep_was_run(data: Dict[str, Any]) -> bool:
     """Return True if the analysis JSON contains any RLM deep analysis fields."""
     return any(
-        data.get(k)
+        _has_data(data.get(k))
         for k in (
             "pattern_analysis",
             "semantic_clusters",
@@ -435,7 +595,8 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
     pattern_analysis = data.get("pattern_analysis")
     refactoring = data.get("refactoring_suggestions")
 
-    if pattern_analysis:
+    if _has_data(pattern_analysis):
+        assert pattern_analysis is not None
         pname = _escape(pattern_analysis.get("detected_pattern", "Unknown"))
         conf = pattern_analysis.get("confidence", 0)
         sentences.append(
@@ -443,7 +604,8 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
             f"pattern with {conf:.0%} confidence."
         )
 
-    if refactoring:
+    if _has_data(refactoring):
+        assert refactoring is not None
         sentences.append(
             f"<strong>{len(refactoring)}</strong> refactoring suggestion"
             f"{'s' if len(refactoring) != 1 else ''} available."
@@ -476,7 +638,7 @@ def _build_pattern_analysis_section(data: Dict[str, Any]) -> str:
     """Build the architectural pattern analysis section from RLM deep data."""
     pattern_analysis = data.get("pattern_analysis")
 
-    if not pattern_analysis:
+    if not _has_data(pattern_analysis):
         msg = (
             "No architectural pattern detected in this codebase."
             if _deep_was_run(data)
@@ -490,6 +652,7 @@ def _build_pattern_analysis_section(data: Dict[str, Any]) -> str:
       </div>
     </section>"""
 
+    assert pattern_analysis is not None
     pname = _escape(pattern_analysis.get("detected_pattern", "Unknown"))
     confidence = pattern_analysis.get("confidence", 0)
     conf_pct = confidence * 100
@@ -669,6 +832,37 @@ def _build_guidance_section() -> str:
     </section>"""
 
 
+def _build_coverage_banner(data: Dict[str, Any]) -> str:
+    """Build a coverage warning banner if import resolution is below 50%."""
+    total_modules = data.get("total_modules", 0)
+    if total_modules == 0:
+        return ""
+    nodes = data.get("graph_data", {}).get("nodes", [])
+    connected = sum(
+        1 for n in nodes if n.get("fan_in", 0) > 0 or n.get("fan_out", 0) > 0
+    )
+    ratio = connected / total_modules
+    if ratio >= 0.5:
+        return ""
+    pct = ratio * 100
+    return f"""
+    <div class="coverage-banner">
+      <span style="font-size:1.3em">&#9432;</span>
+      <div>
+        <strong style="color:#60a5fa">Import Resolution: {pct:.0f}%</strong>
+        <p style="color:#94a3b8;margin:4px 0 0 0;font-size:0.85em">
+          Only {pct:.0f}% of modules have resolved import connections.
+          Health scores and anti-pattern counts may be inflated.
+        </p>
+      </div>
+    </div>"""
+
+
+def _get_antipattern_count(data: Dict[str, Any]) -> int:
+    """Return total count of actionable anti-patterns (excluding info)."""
+    return sum(1 for p in data.get("anti_patterns", []) if p.get("severity") != "info")
+
+
 _CSS = """
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -750,12 +944,37 @@ _CSS = """
     .refactoring-content ul { padding-left: 18px; margin: 6px 0; }
     .refactoring-content li { margin-bottom: 4px; }
     p { margin-bottom: 8px; }
-    nav { margin-bottom: 32px; }
-    nav a {
-      color: #60a5fa; text-decoration: none; margin-right: 16px;
-      font-size: 0.9em;
-    }
-    nav a:hover { text-decoration: underline; }
+
+    /* Tabs */
+    .tab-bar { display:flex; gap:0; border-bottom:2px solid #334155; margin-bottom:24px; overflow-x:auto; }
+    .tab-btn { padding:10px 20px; background:none; border:none; border-bottom:2px solid transparent;
+      color:#94a3b8; font-size:0.9em; font-weight:600; cursor:pointer; white-space:nowrap; margin-bottom:-2px; }
+    .tab-btn:hover { color:#e2e8f0; }
+    .tab-btn.active { color:#60a5fa; border-bottom-color:#60a5fa; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* Severity filter pills */
+    .filter-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    .filter-pill { padding:4px 12px; border-radius:16px; font-size:0.8em; font-weight:600;
+      cursor:pointer; border:1px solid #475569; background:#1e293b; color:#94a3b8; }
+    .filter-pill.active { background:#334155; color:#e2e8f0; }
+
+    /* Accordion groups */
+    .ap-group { margin-bottom:4px; }
+    .ap-group-header { display:flex; align-items:center; gap:8px; cursor:pointer;
+      padding:10px 0; border-bottom:1px solid #334155; user-select:none; }
+    .ap-group-header .chevron { transition:transform 0.2s; color:#94a3b8; }
+    .ap-group-header.open .chevron { transform:rotate(90deg); }
+    .ap-group-body { display:none; padding-top:8px; }
+    .ap-group-body.open { display:block; }
+
+    /* Coverage warning banner */
+    .coverage-banner { background:#1e293b; border:1px solid #60a5fa; border-radius:8px;
+      padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; gap:12px; }
+
+    /* Print: show all tabs */
+    @media print { .tab-panel { display:block !important; } .tab-bar { display:none; } }
 """
 
 
@@ -784,36 +1003,124 @@ def generate_analysis_report(
     health = _health_rating(data)
     repo_name = _escape(data.get("repository", "unknown"))
 
-    nav = """
-    <nav>
-      <a href="#executive-summary">Executive Summary</a>
-      <a href="#summary">Summary</a>
-      <a href="#health">Health</a>
-      <a href="#pattern">Pattern</a>
-      <a href="#rlm-insights">RLM Insights</a>
-      <a href="#fan-metrics">Fan-In/Out</a>
-      <a href="#hubs">Hubs</a>
-      <a href="#cycles">Cycles</a>
-      <a href="#antipatterns">Anti-Patterns</a>
-      <a href="#refactoring">Refactoring</a>
-      <a href="#layers">Layers</a>
-      <a href="#guidance">Guidance</a>
-    </nav>"""
+    # Build tab contents
+    has_deep = _deep_was_run(data)
+    issue_count = _get_antipattern_count(data) + len(data.get("cycles", []))
 
-    body = (
-        _build_executive_summary_section(data, health)
+    # Tab 1: Overview
+    tab_overview = (
+        _build_coverage_banner(data)
+        + _build_executive_summary_section(data, health)
         + _build_summary_section(data, health)
-        + _build_health_section(health)
-        + _build_pattern_analysis_section(data)
-        + _build_rlm_insights_section(data)
-        + _build_fanin_fanout_section()
-        + _build_hub_modules_section(data)
-        + _build_cycles_section(data)
-        + _build_antipatterns_section(data)
-        + _build_refactoring_section(data)
-        + _build_layers_section(data)
-        + _build_guidance_section()
+        + _build_health_section(health, data)
     )
+
+    # Tab 2: Architecture
+    tab_architecture = (
+        _build_pattern_analysis_section(data)
+        + _build_layers_section(data)
+        + _build_hub_modules_section(data)
+        + _build_fanin_fanout_section()
+    )
+
+    # Tab 3: Issues
+    tab_issues = _build_antipatterns_section(data) + _build_cycles_section(data)
+
+    # Tab 4: Deep Analysis (conditional)
+    tab_deep = ""
+    if has_deep:
+        tab_deep = _build_rlm_insights_section(data) + _build_refactoring_section(data)
+
+    # Tab 5: Guidance
+    tab_guidance = _build_guidance_section()
+
+    # Build tab bar
+    issue_badge = (
+        f' <span class="badge" style="background:#475569;color:#e2e8f0;font-size:0.75em;margin-left:4px">{issue_count}</span>'
+        if issue_count
+        else ""
+    )
+    tab_buttons = f"""
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="tab-overview">Overview</button>
+      <button class="tab-btn" data-tab="tab-architecture">Architecture</button>
+      <button class="tab-btn" data-tab="tab-issues">Issues{issue_badge}</button>"""
+    if has_deep:
+        tab_buttons += """
+      <button class="tab-btn" data-tab="tab-deep">Deep Analysis</button>"""
+    tab_buttons += """
+      <button class="tab-btn" data-tab="tab-guidance">Guidance</button>
+    </div>"""
+
+    # Build tab panels
+    tab_panels = f"""
+    <div id="tab-overview" class="tab-panel active">{tab_overview}</div>
+    <div id="tab-architecture" class="tab-panel">{tab_architecture}</div>
+    <div id="tab-issues" class="tab-panel">{tab_issues}</div>"""
+    if has_deep:
+        tab_panels += f"""
+    <div id="tab-deep" class="tab-panel">{tab_deep}</div>"""
+    tab_panels += f"""
+    <div id="tab-guidance" class="tab-panel">{tab_guidance}</div>"""
+
+    # JavaScript for interactivity
+    js = """
+<script>
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+// Accordion toggle
+document.querySelectorAll('.ap-group-header').forEach(h => {
+  h.addEventListener('click', () => {
+    h.classList.toggle('open');
+    h.nextElementSibling.classList.toggle('open');
+  });
+});
+// Severity filter
+document.querySelectorAll('.filter-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    const isAll = pill.dataset.severity === 'all';
+    if (isAll) {
+      document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+    } else {
+      document.querySelector('.filter-pill[data-severity="all"]').classList.remove('active');
+      pill.classList.toggle('active');
+      if (!document.querySelector('.filter-pill.active')) {
+        document.querySelector('.filter-pill[data-severity="all"]').classList.add('active');
+      }
+    }
+    const activePills = [...document.querySelectorAll('.filter-pill.active')].map(p => p.dataset.severity);
+    const showAll = activePills.includes('all');
+    document.querySelectorAll('.ap-item[data-severity]').forEach(item => {
+      const visible = showAll || activePills.includes(item.dataset.severity);
+      if (visible) {
+        if (!item.classList.contains('hidden-item')) item.style.display = '';
+      } else {
+        item.style.display = 'none';
+      }
+    });
+    document.querySelectorAll('.ap-group').forEach(group => {
+      const items = group.querySelectorAll('.ap-item[data-severity]');
+      const anyVisible = [...items].some(i => i.style.display !== 'none');
+      group.style.display = anyVisible ? '' : 'none';
+    });
+  });
+});
+// Show more
+document.querySelectorAll('.show-more-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.previousElementSibling.querySelectorAll('.ap-item.hidden-item').forEach(i => i.style.display = '');
+    btn.style.display = 'none';
+  });
+});
+</script>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -826,15 +1133,16 @@ def generate_analysis_report(
 <body>
   <h1>{repo_name} — Architecture Report</h1>
   <p class="subtitle">Generated by RLM-Codelens</p>
-  {nav}
-  {body}
+  {tab_buttons}
+  {tab_panels}
+  {js}
 </body>
 </html>
 """
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(html)
+    output_path.write_text(html, encoding="utf-8")
 
     abs_path = str(output_path.resolve())
 

@@ -1,6 +1,7 @@
 """Tests for the architecture analyzer (RLM integration) module."""
 
 import json
+from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,7 +10,7 @@ from rlm_codelens.repo_scanner import ModuleInfo, RepositoryStructure
 
 
 @pytest.fixture
-def simple_structure():
+def simple_structure() -> RepositoryStructure:
     """Minimal RepositoryStructure for RLM analyzer tests."""
     modules = {
         "src/main.py": ModuleInfo(
@@ -51,7 +52,9 @@ def simple_structure():
 class TestImportGuard:
     """Test that ImportError is handled gracefully when rlm is not installed."""
 
-    def test_rlm_not_available_raises_import_error(self, simple_structure):
+    def test_rlm_not_available_raises_import_error(
+        self, simple_structure: RepositoryStructure
+    ) -> None:
         """When rlm package is not installed, ArchitectureRLMAnalyzer should raise ImportError."""
         with patch.dict("sys.modules", {"rlm": None}):
             # Force reimport
@@ -70,7 +73,7 @@ class TestImportGuard:
 class TestBudgetTracker:
     """Test RLMCostTracker budget enforcement."""
 
-    def test_budget_exceeded(self):
+    def test_budget_exceeded(self) -> None:
         from rlm_codelens.architecture_analyzer import (
             BudgetExceededError,
             RLMCostTracker,
@@ -81,14 +84,14 @@ class TestBudgetTracker:
         with pytest.raises(BudgetExceededError):
             tracker.check_budget()
 
-    def test_budget_not_exceeded(self):
+    def test_budget_not_exceeded(self) -> None:
         from rlm_codelens.architecture_analyzer import RLMCostTracker
 
         tracker = RLMCostTracker(budget=10.0)
         tracker.total_cost = 5.0
         tracker.check_budget()  # Should not raise
 
-    def test_record_tracks_calls(self):
+    def test_record_tracks_calls(self) -> None:
         from rlm_codelens.architecture_analyzer import RLMCostTracker
 
         tracker = RLMCostTracker(budget=10.0)
@@ -104,7 +107,7 @@ class TestBudgetTracker:
         assert len(tracker.call_log) == 1
         assert tracker.call_log[0]["label"] == "test_call"
 
-    def test_summary(self):
+    def test_summary(self) -> None:
         from rlm_codelens.architecture_analyzer import RLMCostTracker
 
         tracker = RLMCostTracker(budget=10.0)
@@ -122,14 +125,16 @@ class TestArchitectureRLMAnalyzerMocked:
     """Test ArchitectureRLMAnalyzer with mocked RLM."""
 
     @pytest.fixture
-    def mock_rlm(self):
+    def mock_rlm(self) -> MagicMock:
         """Create a mock RLM instance."""
         mock = MagicMock()
         mock.completion = MagicMock()
         return mock
 
     @pytest.fixture
-    def analyzer(self, simple_structure, mock_rlm):
+    def analyzer(
+        self, simple_structure: RepositoryStructure, mock_rlm: MagicMock
+    ) -> Generator[Any, None, None]:
         """Create an analyzer with mocked RLM."""
         import rlm_codelens.architecture_analyzer as mod
 
@@ -158,7 +163,9 @@ class TestArchitectureRLMAnalyzerMocked:
             elif hasattr(mod, "RLM"):
                 delattr(mod, "RLM")
 
-    def test_classify_modules_parses_json(self, analyzer, mock_rlm):
+    def test_classify_modules_parses_json(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         result = MagicMock()
         result.response = json.dumps(
             {"src/main.py": "business", "src/utils.py": "util"}
@@ -171,7 +178,9 @@ class TestArchitectureRLMAnalyzerMocked:
         assert classifications == {"src/main.py": "business", "src/utils.py": "util"}
         mock_rlm.completion.assert_called_once()
 
-    def test_classify_modules_bad_response(self, analyzer, mock_rlm):
+    def test_classify_modules_bad_response(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         result = MagicMock()
         result.response = "not json"
         result.usage = MagicMock()
@@ -181,7 +190,7 @@ class TestArchitectureRLMAnalyzerMocked:
         classifications = analyzer.classify_modules()
         assert classifications == {}  # Graceful fallback
 
-    def test_discover_hidden_deps(self, analyzer, mock_rlm):
+    def test_discover_hidden_deps(self, analyzer: Any, mock_rlm: MagicMock) -> None:
         result = MagicMock()
         result.response = json.dumps(
             [
@@ -201,7 +210,7 @@ class TestArchitectureRLMAnalyzerMocked:
         assert len(deps) == 1
         assert deps[0]["type"] == "dynamic_import"
 
-    def test_detect_patterns(self, analyzer, mock_rlm):
+    def test_detect_patterns(self, analyzer: Any, mock_rlm: MagicMock) -> None:
         result = MagicMock()
         result.response = json.dumps(
             {
@@ -219,7 +228,7 @@ class TestArchitectureRLMAnalyzerMocked:
         assert patterns["detected_pattern"] == "layered"
         assert patterns["confidence"] == 0.85
 
-    def test_suggest_refactoring(self, analyzer, mock_rlm):
+    def test_suggest_refactoring(self, analyzer: Any, mock_rlm: MagicMock) -> None:
         result = MagicMock()
         result.response = json.dumps(
             [
@@ -235,7 +244,7 @@ class TestArchitectureRLMAnalyzerMocked:
         assert len(suggestions) == 2
         assert "database" in suggestions[0].lower()
 
-    def test_run_all(self, analyzer, mock_rlm):
+    def test_run_all(self, analyzer: Any, mock_rlm: MagicMock) -> None:
         # Each call returns valid JSON
         responses = [
             json.dumps({"src/main.py": "business"}),  # classify
@@ -252,7 +261,7 @@ class TestArchitectureRLMAnalyzerMocked:
         ]
         call_count = 0
 
-        def side_effect(*args, **kwargs):
+        def side_effect(*args: Any, **kwargs: Any) -> MagicMock:
             nonlocal call_count
             result = MagicMock()
             result.response = responses[min(call_count, len(responses) - 1)]
@@ -271,7 +280,7 @@ class TestArchitectureRLMAnalyzerMocked:
         assert "cost_summary" in results
         assert results["cost_summary"]["calls"] == 4
 
-    def test_budget_enforcement(self, analyzer, mock_rlm):
+    def test_budget_enforcement(self, analyzer: Any, mock_rlm: MagicMock) -> None:
         """After exceeding budget, run_all should still return partial results."""
         analyzer.cost_tracker.budget = 0.001  # Very low budget
 
@@ -290,31 +299,31 @@ class TestArchitectureRLMAnalyzerMocked:
 class TestStripMarkdownFences:
     """Test _strip_markdown_fences helper for robust RLM response parsing."""
 
-    def test_plain_json(self):
+    def test_plain_json(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         text = '{"key": "value"}'
         assert _strip_markdown_fences(text) == '{"key": "value"}'
 
-    def test_json_fenced(self):
+    def test_json_fenced(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         text = '```json\n{"key": "value"}\n```'
         assert _strip_markdown_fences(text) == '{"key": "value"}'
 
-    def test_plain_fenced(self):
+    def test_plain_fenced(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         text = "```\n[1, 2, 3]\n```"
         assert _strip_markdown_fences(text) == "[1, 2, 3]"
 
-    def test_fenced_with_whitespace(self):
+    def test_fenced_with_whitespace(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         text = '  ```json\n  {"a": 1}\n  ```  '
         assert _strip_markdown_fences(text) == '{"a": 1}'
 
-    def test_fenced_multiline_json(self):
+    def test_fenced_multiline_json(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         text = (
@@ -325,7 +334,7 @@ class TestStripMarkdownFences:
         assert parsed["detected_pattern"] == "layered"
         assert parsed["confidence"] == 0.85
 
-    def test_empty_string(self):
+    def test_empty_string(self) -> None:
         from rlm_codelens.architecture_analyzer import _strip_markdown_fences
 
         assert _strip_markdown_fences("") == ""
@@ -336,11 +345,13 @@ class TestMarkdownFencedResponses:
     """Test that analyzer methods handle markdown-fenced RLM responses."""
 
     @pytest.fixture
-    def mock_rlm(self):
+    def mock_rlm(self) -> MagicMock:
         return MagicMock()
 
     @pytest.fixture
-    def analyzer(self, simple_structure, mock_rlm):
+    def analyzer(
+        self, simple_structure: RepositoryStructure, mock_rlm: MagicMock
+    ) -> Generator[Any, None, None]:
         import rlm_codelens.architecture_analyzer as mod
 
         original_available = mod.RLM_AVAILABLE
@@ -364,7 +375,9 @@ class TestMarkdownFencedResponses:
             elif hasattr(mod, "RLM"):
                 delattr(mod, "RLM")
 
-    def test_detect_patterns_with_fenced_response(self, analyzer, mock_rlm):
+    def test_detect_patterns_with_fenced_response(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """RLM returns markdown-fenced JSON — should still parse correctly."""
         fenced_json = '```json\n{"detected_pattern": "modular monolith", "confidence": 0.7, "anti_patterns": ["god modules"], "reasoning": "test"}\n```'
         result = MagicMock()
@@ -377,7 +390,9 @@ class TestMarkdownFencedResponses:
         assert patterns["detected_pattern"] == "modular monolith"
         assert patterns["confidence"] == 0.7
 
-    def test_classify_modules_with_fenced_response(self, analyzer, mock_rlm):
+    def test_classify_modules_with_fenced_response(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         fenced_json = (
             '```json\n{"src/main.py": "business", "src/utils.py": "util"}\n```'
         )
@@ -390,7 +405,9 @@ class TestMarkdownFencedResponses:
         classifications = analyzer.classify_modules()
         assert classifications == {"src/main.py": "business", "src/utils.py": "util"}
 
-    def test_suggest_refactoring_with_fenced_response(self, analyzer, mock_rlm):
+    def test_suggest_refactoring_with_fenced_response(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         fenced_json = '```json\n["Suggestion 1", "Suggestion 2"]\n```'
         result = MagicMock()
         result.response = fenced_json
@@ -401,7 +418,9 @@ class TestMarkdownFencedResponses:
         suggestions = analyzer.suggest_refactoring()
         assert suggestions == ["Suggestion 1", "Suggestion 2"]
 
-    def test_discover_hidden_deps_with_fenced_response(self, analyzer, mock_rlm):
+    def test_discover_hidden_deps_with_fenced_response(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         fenced_json = '```json\n[{"source": "src/main.py", "target": "plugin", "type": "dynamic_import", "evidence": "importlib"}]\n```'
         result = MagicMock()
         result.response = fenced_json
@@ -418,11 +437,13 @@ class TestRLMOutputValidation:
     """Tests for RLM output validation logic."""
 
     @pytest.fixture
-    def mock_rlm(self):
+    def mock_rlm(self) -> MagicMock:
         return MagicMock()
 
     @pytest.fixture
-    def analyzer(self, simple_structure, mock_rlm):
+    def analyzer(
+        self, simple_structure: RepositoryStructure, mock_rlm: MagicMock
+    ) -> Generator[Any, None, None]:
         import rlm_codelens.architecture_analyzer as mod
 
         original_available = mod.RLM_AVAILABLE
@@ -446,14 +467,16 @@ class TestRLMOutputValidation:
             elif hasattr(mod, "RLM"):
                 delattr(mod, "RLM")
 
-    def _make_result(self, response_json):
+    def _make_result(self, response_json: object) -> MagicMock:
         result = MagicMock()
         result.response = json.dumps(response_json)
         result.usage = MagicMock()
         result.usage.total_cost = 0.01
         return result
 
-    def test_classify_modules_filters_unknown_modules(self, analyzer, mock_rlm):
+    def test_classify_modules_filters_unknown_modules(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Unknown module paths not in structure.modules should be filtered out."""
         mock_rlm.completion.return_value = self._make_result(
             {"src/main.py": "business", "src/utils.py": "util", "nonexistent.py": "api"}
@@ -462,7 +485,9 @@ class TestRLMOutputValidation:
         assert "nonexistent.py" not in classifications
         assert classifications == {"src/main.py": "business", "src/utils.py": "util"}
 
-    def test_discover_hidden_deps_drops_missing_keys(self, analyzer, mock_rlm):
+    def test_discover_hidden_deps_drops_missing_keys(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Items missing required keys (source, target, type, evidence) should be dropped."""
         mock_rlm.completion.return_value = self._make_result(
             [
@@ -480,7 +505,9 @@ class TestRLMOutputValidation:
         assert len(deps) == 1
         assert deps[0]["target"] == "b.py"
 
-    def test_discover_hidden_deps_drops_self_references(self, analyzer, mock_rlm):
+    def test_discover_hidden_deps_drops_self_references(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Self-referencing deps (source == target) should be dropped."""
         mock_rlm.completion.return_value = self._make_result(
             [
@@ -502,7 +529,9 @@ class TestRLMOutputValidation:
         assert len(deps) == 1
         assert deps[0]["target"] == "b.py"
 
-    def test_discover_hidden_deps_drops_non_dict_items(self, analyzer, mock_rlm):
+    def test_discover_hidden_deps_drops_non_dict_items(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Non-dict items in the list should be dropped."""
         mock_rlm.completion.return_value = self._make_result(
             [
@@ -514,7 +543,9 @@ class TestRLMOutputValidation:
         deps = analyzer.discover_hidden_deps()
         assert len(deps) == 1
 
-    def test_detect_patterns_clamps_confidence(self, analyzer, mock_rlm):
+    def test_detect_patterns_clamps_confidence(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Confidence should be clamped to [0.0, 1.0]."""
         mock_rlm.completion.return_value = self._make_result(
             {
@@ -527,7 +558,9 @@ class TestRLMOutputValidation:
         patterns = analyzer.detect_patterns()
         assert patterns["confidence"] == 1.0
 
-    def test_detect_patterns_clamps_negative_confidence(self, analyzer, mock_rlm):
+    def test_detect_patterns_clamps_negative_confidence(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Negative confidence should be clamped to 0.0."""
         mock_rlm.completion.return_value = self._make_result(
             {
@@ -540,7 +573,9 @@ class TestRLMOutputValidation:
         patterns = analyzer.detect_patterns()
         assert patterns["confidence"] == 0.0
 
-    def test_detect_patterns_coerces_anti_patterns_to_list(self, analyzer, mock_rlm):
+    def test_detect_patterns_coerces_anti_patterns_to_list(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """If anti_patterns is not a list, it should be wrapped in one."""
         mock_rlm.completion.return_value = self._make_result(
             {
@@ -553,7 +588,9 @@ class TestRLMOutputValidation:
         patterns = analyzer.detect_patterns()
         assert patterns["anti_patterns"] == ["tight coupling"]
 
-    def test_detect_patterns_defaults_missing_keys(self, analyzer, mock_rlm):
+    def test_detect_patterns_defaults_missing_keys(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Missing keys should get sensible defaults."""
         mock_rlm.completion.return_value = self._make_result({})
         patterns = analyzer.detect_patterns()
@@ -562,7 +599,9 @@ class TestRLMOutputValidation:
         assert patterns["anti_patterns"] == []
         assert patterns["reasoning"] == ""
 
-    def test_detect_patterns_invalid_confidence_type(self, analyzer, mock_rlm):
+    def test_detect_patterns_invalid_confidence_type(
+        self, analyzer: Any, mock_rlm: MagicMock
+    ) -> None:
         """Non-numeric confidence should default to 0.0."""
         mock_rlm.completion.return_value = self._make_result(
             {

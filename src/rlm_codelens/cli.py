@@ -33,7 +33,7 @@ Examples:
   rlmc analyze-architecture scan.json --deep --budget 5.0
 
   # Analyze with Ollama (free, local)
-  rlmc analyze-architecture scan.json --deep --backend openai --model llama3.1 --base-url http://localhost:11434/v1
+  rlmc analyze-architecture scan.json --ollama --model deepseek-r1:latest
 
   # Generate interactive architecture visualization
   rlmc visualize-arch arch.json
@@ -103,7 +103,12 @@ Examples:
     arch_parser.add_argument(
         "--deep",
         action="store_true",
-        help="Enable RLM-powered deep analysis (requires API key)",
+        help="Enable RLM-powered deep analysis (requires API key or --ollama)",
+    )
+    arch_parser.add_argument(
+        "--ollama",
+        action="store_true",
+        help="Use local Ollama for deep analysis (shorthand for --backend openai --base-url http://localhost:11434/v1)",
     )
     arch_parser.add_argument(
         "--backend",
@@ -226,13 +231,22 @@ def main(args: Optional[List[str]] = None) -> int:
         elif parsed_args.command == "analyze-architecture":
             from rlm_codelens.commands import analyze_architecture
 
+            # --ollama implies --deep and sets backend/base-url
+            backend = parsed_args.backend
+            base_url = parsed_args.base_url
+            deep = parsed_args.deep
+            if parsed_args.ollama:
+                deep = True
+                backend = backend or "openai"
+                base_url = base_url or "http://localhost:11434/v1"
+
             analyze_architecture(
                 scan_file=parsed_args.scan_file,
                 repo_path=parsed_args.repo,
-                deep=parsed_args.deep,
-                backend=parsed_args.backend,
+                deep=deep,
+                backend=backend,
                 model=parsed_args.model,
-                base_url=parsed_args.base_url,
+                base_url=base_url,
                 budget=parsed_args.budget,
                 output=parsed_args.output,
             )

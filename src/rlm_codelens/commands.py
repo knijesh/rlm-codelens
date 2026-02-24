@@ -4,9 +4,39 @@ This module contains the actual implementation of CLI commands,
 separated from argument parsing for better testability.
 """
 
+import shutil
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+SAMPLES_DIR = Path("samples")
+
+
+def _sync_to_samples(output_paths: List[str]) -> None:
+    """Copy output files to samples folder, replacing previous contents.
+
+    Args:
+        output_paths: List of output file paths to copy
+    """
+    SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    for item in SAMPLES_DIR.iterdir():
+        if item.name == ".gitkeep":
+            continue
+        if item.is_file():
+            item.unlink()
+        elif item.is_dir():
+            shutil.rmtree(item)
+
+    for path_str in output_paths:
+        src = Path(path_str)
+        if not src.exists():
+            continue
+
+        dst = SAMPLES_DIR / src.name
+        shutil.copy2(src, dst)
+
+    print(f"   📁 Latest outputs synced to {SAMPLES_DIR}/")
 
 
 def run_phase(
@@ -177,10 +207,24 @@ def scan_repository(
             structure.name = name
 
         # Print summary
+        # Count files by language
+        lang_counts: Dict[str, int] = {}
+        for mod in structure.modules.values():
+            lang = getattr(mod, "language", "python")
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+
         print("\n📊 Scan Summary:")
         print(f"   Repository: {structure.name}")
-        print(f"   Python files: {structure.total_files}")
+        print(f"   Source files: {structure.total_files}")
         print(f"   Total lines: {structure.total_lines:,}")
+        if lang_counts:
+            langs = ", ".join(
+                f"{lang}: {cnt}"
+                for lang, cnt in sorted(
+                    lang_counts.items(), key=lambda x: x[1], reverse=True
+                )
+            )
+            print(f"   Languages: {langs}")
         print(f"   Packages: {len(structure.packages)}")
         print(f"   Entry points: {len(structure.entry_points)}")
 
@@ -198,6 +242,7 @@ def scan_repository(
 
         # Save
         structure.save(output)
+        _sync_to_samples([output])
 
         print(f"\n{'=' * 70}")
         print(f"✅ Scan saved to: {output}")
@@ -385,9 +430,6 @@ def analyze_architecture(
                 f"\n💰 RLM Cost: ${cost.get('total_cost', 0):.4f} / ${cost.get('budget', budget):.2f}"
             )
 
-        except ImportError as e:
-            print(f"\n❌ RLM not available: {e}")
-            print("   Install with: pip install rlm")
         except Exception as e:
             print(f"\n❌ RLM analysis failed: {e}")
             import traceback
@@ -396,6 +438,7 @@ def analyze_architecture(
 
     # Save results
     analysis.save(output)
+    _sync_to_samples([output])
 
     print(f"\n{'=' * 70}")
     print(f"✅ Architecture analysis saved to: {output}")
@@ -429,6 +472,8 @@ def visualize_architecture(
             output_file=output,
             open_browser=open_browser,
         )
+
+        _sync_to_samples([output_path])
 
         print(f"\n{'=' * 70}")
         print("✅ Architecture visualization generated!")
@@ -476,6 +521,8 @@ def generate_report(
             output_file=output,
             open_browser=open_browser,
         )
+
+        _sync_to_samples([output_path])
 
         print(f"\n{'=' * 70}")
         print("✅ Analysis report generated!")

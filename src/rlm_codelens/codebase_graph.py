@@ -171,6 +171,33 @@ class CodebaseGraphAnalyzer:
         """Build the directed graph from module imports."""
         # Collect all known internal package prefixes
         self._internal_packages = set(self.structure.packages)
+        # For src-layout projects, also consider non-prefixed package names
+        for pkg in list(self._internal_packages):
+            if pkg.startswith("src."):
+                self._internal_packages.add(pkg[4:])
+
+        # Build lookup tables for import resolution
+        # package name -> file path (Python)
+        self._package_to_path: Dict[str, str] = {}
+        # file path without extension -> file path (multi-language)
+        self._path_lookup: Dict[str, str] = {}
+        # directory -> list of file paths (for directory-based imports like Go)
+        self._dir_to_files: Dict[str, List[str]] = {}
+
+        for path, module in self.structure.modules.items():
+            self._package_to_path[module.package] = path
+            # For src-layout projects, also register without "src." prefix
+            # so that imports like "rlm_codelens.cli" resolve to
+            # "src/rlm_codelens/cli.py" (package="src.rlm_codelens.cli").
+            if module.package.startswith("src."):
+                self._package_to_path[module.package[4:]] = path
+            # Build path-based lookups for non-Python languages
+            path_no_ext = str(Path(path).with_suffix(""))
+            self._path_lookup[path_no_ext] = path
+            self._path_lookup[path] = path
+            # Directory-based lookup
+            dir_path = str(Path(path).parent)
+            self._dir_to_files.setdefault(dir_path, []).append(path)
 
         # Add nodes
         for path, module in self.structure.modules.items():
@@ -182,30 +209,30 @@ class CodebaseGraphAnalyzer:
                 num_functions=len(module.functions),
                 is_test=module.is_test,
                 docstring=module.docstring or "",
+                language=getattr(module, "language", "python"),
             )
-
-        # Build a lookup from package name to file path
-        package_to_path: Dict[str, str] = {}
-        for path, module in self.structure.modules.items():
-            package_to_path[module.package] = path
 
         # Add edges for internal imports only
         for path, module in self.structure.modules.items():
             targets = set()
+            lang = getattr(module, "language", "python")
 
-            # Direct imports: import foo.bar
+            # Direct imports
             for imp in module.imports:
-                target_path = self._resolve_import(imp, package_to_path)
-                if target_path and target_path != path:
-                    targets.add(target_path)
+                resolved = self._resolve_import_multi(imp, path, lang)
+                for target_path in resolved:
+                    if target_path != path:
+                        targets.add(target_path)
 
-            # From imports: from foo.bar import baz
+            # From imports (Python-specific)
             for from_imp in module.from_imports:
                 mod_name = from_imp.get("module", "")
                 if mod_name:
-                    target_path = self._resolve_import(mod_name, package_to_path)
-                    if target_path and target_path != path:
-                        targets.add(target_path)
+                    resolved_path = self._resolve_import(
+                        mod_name, self._package_to_path
+                    )
+                    if resolved_path and resolved_path != path:
+                        targets.add(resolved_path)
 
             for target in targets:
                 self.graph.add_edge(path, target)
@@ -213,8 +240,9 @@ class CodebaseGraphAnalyzer:
         # Store stdlib/third-party imports as node attributes
         for path, module in self.structure.modules.items():
             external = []
+            lang = getattr(module, "language", "python")
             for imp in module.imports:
-                if not self._is_internal(imp):
+                if not self._is_internal_multi(imp, lang):
                     external.append(imp)
             for from_imp in module.from_imports:
                 mod_name = from_imp.get("module", "")
@@ -250,6 +278,127 @@ class CodebaseGraphAnalyzer:
                 return package_to_path[prefix]
 
         return None
+
+    def _resolve_import_multi(
+        self, import_name: str, source_path: str, language: str
+    ) -> List[str]:
+        """Resolve an import to file path(s), handling language-specific conventions.
+
+        Returns a list because some import styles (Go package imports) can
+        resolve to multiple files in a directory.
+        """
+        if language == "python":
+            result = self._resolve_import(import_name, self._package_to_path)
+            return [result] if result else []
+
+        if language == "go":
+            return self._resolve_go_import(import_name, source_path)
+
+        if language in ("javascript", "typescript"):
+            return self._resolve_js_import(import_name, source_path)
+
+        if language == "java":
+            return self._resolve_java_import(import_name)
+
+        if language == "rust":
+            return self._resolve_rust_import(import_name, source_path)
+
+        # Fallback: try path-based matching
+        result = self._resolve_import(import_name, self._package_to_path)
+        return [result] if result else []
+
+    def _resolve_go_import(self, import_path: str, source_path: str) -> List[str]:
+        """Resolve a Go import path to internal file(s).
+
+        Go imports are package paths like "k8s.io/kubernetes/pkg/api".
+        We match against directory suffixes in the repo.
+        """
+        # Strip the module prefix -- try matching directory suffixes
+        parts = import_path.split("/")
+        # Try progressively shorter suffixes
+        for i in range(len(parts)):
+            candidate_dir = "/".join(parts[i:])
+            if candidate_dir in self._dir_to_files:
+                return self._dir_to_files[candidate_dir]
+
+        return []
+
+    def _resolve_js_import(self, import_path: str, source_path: str) -> List[str]:
+        """Resolve a JS/TS import path (relative imports only)."""
+        if not import_path.startswith("."):
+            return []  # npm package, not internal
+
+        source_dir = str(Path(source_path).parent)
+        # Resolve relative path
+        resolved = str((Path(source_dir) / import_path).resolve())
+        # Normalize -- strip any leading / or make relative to repo
+        # Try with common extensions
+        for suffix in ("", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"):
+            candidate = resolved + suffix
+            # Try to match against known paths
+            for known_path in self._path_lookup:
+                if known_path.endswith(candidate) or candidate.endswith(known_path):
+                    return [self._path_lookup[known_path]]
+
+        # Direct match
+        if resolved in self._path_lookup:
+            return [self._path_lookup[resolved]]
+
+        return []
+
+    def _resolve_java_import(self, import_name: str) -> List[str]:
+        """Resolve a Java import (e.g., com.example.Foo) to a file path."""
+        # Java imports map to directory structure: com.example.Foo -> com/example/Foo.java
+        path_candidate = import_name.replace(".", "/")
+        # Try exact match
+        if path_candidate in self._path_lookup:
+            return [self._path_lookup[path_candidate]]
+        # Try with .java suffix
+        java_path = path_candidate + ".java"
+        if java_path in self._path_lookup:
+            return [self._path_lookup[java_path]]
+        # Try matching suffix (package might be partial)
+        for known in self._path_lookup:
+            if known.endswith(path_candidate) or known.endswith(java_path):
+                return [self._path_lookup[known]]
+        return []
+
+    def _resolve_rust_import(self, import_name: str, source_path: str) -> List[str]:
+        """Resolve a Rust use path (e.g., crate::module::Type)."""
+        parts = import_name.replace("::", "/").split("/")
+        # Strip 'crate', 'self', 'super' prefixes
+        while parts and parts[0] in ("crate", "self", "super"):
+            parts.pop(0)
+        if not parts:
+            return []
+
+        candidate = "/".join(parts)
+        for suffix in ("", ".rs", "/mod.rs"):
+            full = candidate + suffix
+            for known in self._path_lookup:
+                if known.endswith(full):
+                    return [self._path_lookup[known]]
+        return []
+
+    def _is_internal_multi(self, import_name: str, language: str) -> bool:
+        """Check if an import is internal, handling language conventions."""
+        if language == "python":
+            return self._is_internal(import_name)
+
+        if language in ("javascript", "typescript"):
+            return import_name.startswith(".")
+
+        if language == "go":
+            # Go imports that resolve to internal files are internal
+            return bool(self._resolve_go_import(import_name, ""))
+
+        if language == "java":
+            return bool(self._resolve_java_import(import_name))
+
+        if language == "rust":
+            return import_name.startswith(("crate::", "self::", "super::"))
+
+        return False
 
     def analyze(self) -> ArchitectureAnalysis:
         """Run all analyses and return results."""
@@ -384,6 +533,26 @@ class CodebaseGraphAnalyzer:
         """
         patterns = []
 
+        # When edge density is very low relative to module count, import
+        # resolution is not working for this codebase's primary language.
+        # Orphan detection would just flag every module, which is noise.
+        num_nodes = self.graph.number_of_nodes()
+        num_edges = self.graph.number_of_edges()
+        low_edge_density = num_nodes > 20 and num_edges < num_nodes * 0.05
+
+        # Count orphans (modules with zero connections)
+        orphan_count = sum(
+            1
+            for n in self.graph.nodes()
+            if self.graph.in_degree(n) == 0 and self.graph.out_degree(n) == 0
+        )
+        orphan_ratio = orphan_count / num_nodes if num_nodes > 0 else 0
+
+        # Suppress individual orphan reporting when orphan ratio is too high.
+        # In large repos, >50% orphans indicates import resolution limitations,
+        # not actual architectural problems.
+        suppress_orphans = low_edge_density or (num_nodes > 50 and orphan_ratio > 0.5)
+
         # Layer ordering (lower number = lower layer)
         layer_order = {
             "data": 0,
@@ -394,13 +563,18 @@ class CodebaseGraphAnalyzer:
             "test": 99,
         }
 
+        # Adaptive god-module thresholds — larger repos tend to have more
+        # imports per file (especially Go with many internal packages).
+        god_loc_threshold = 500 if num_nodes < 500 else 1000
+        god_fanout_threshold = 10 if num_nodes < 500 else 20
+
         for node in self.graph.nodes():
             loc = self.graph.nodes[node].get("loc", 0)
             fan_out = self.graph.out_degree(node)
             fan_in = self.graph.in_degree(node)
 
             # God module: large file with many outgoing dependencies
-            if loc > 500 and fan_out > 10:
+            if loc > god_loc_threshold and fan_out > god_fanout_threshold:
                 patterns.append(
                     AntiPattern(
                         type="god_module",
@@ -411,7 +585,7 @@ class CodebaseGraphAnalyzer:
                 )
 
             # Orphan module: no connections at all
-            if fan_in == 0 and fan_out == 0:
+            if fan_in == 0 and fan_out == 0 and not suppress_orphans:
                 is_test = self.graph.nodes[node].get("is_test", False)
                 if not is_test and not node.endswith("__init__.py"):
                     patterns.append(
@@ -423,7 +597,24 @@ class CodebaseGraphAnalyzer:
                         )
                     )
 
-        # Layer violations
+        # When orphans are suppressed and there are orphans, emit a single
+        # informational anti-pattern instead of thousands of individual entries.
+        if suppress_orphans and orphan_count > 0:
+            patterns.append(
+                AntiPattern(
+                    type="import_resolution_limited",
+                    module="(repository-wide)",
+                    details=(
+                        f"{orphan_count} of {num_nodes} modules have no resolved "
+                        f"imports. Import resolution may be incomplete for this "
+                        f"language."
+                    ),
+                    severity="info",
+                )
+            )
+
+        # Layer violations — only flag when at least one side has an explicit
+        # (non-default) layer assignment.
         for source, target in self.graph.edges():
             source_layer = layers.get(source, "business")
             target_layer = layers.get(target, "business")
@@ -433,19 +624,37 @@ class CodebaseGraphAnalyzer:
             # Lower layer importing higher layer is a violation
             # (data importing api, for instance)
             if source_order >= 0 and target_order >= 0 and source_order < target_order:
-                # data -> api or data -> business is a violation
-                # but only if they're not both generic
                 if source_layer != target_layer:
-                    patterns.append(
-                        AntiPattern(
-                            type="layer_violation",
-                            module=source,
-                            details=f"Layer violation: {source_layer} layer ({source}) imports {target_layer} layer ({target}).",
-                            severity="medium",
+                    # Require BOTH sides to have confident (explicit,
+                    # non-default) layer classifications to reduce
+                    # false positives in non-Python repos where path
+                    # keywords like "api", "core", "service" are common.
+                    source_explicit = self._has_explicit_layer(source)
+                    target_explicit = self._has_explicit_layer(target)
+                    if source_explicit and target_explicit:
+                        patterns.append(
+                            AntiPattern(
+                                type="layer_violation",
+                                module=source,
+                                details=f"Layer violation: {source_layer} layer ({source}) imports {target_layer} layer ({target}).",
+                                severity="medium",
+                            )
                         )
-                    )
 
         return patterns
+
+    def _has_explicit_layer(self, path: str) -> bool:
+        """Check if a module has an explicit (non-default) layer classification."""
+        parts_lower = [p.lower() for p in Path(path).parts]
+        stem = Path(path).stem.lower()
+        for keywords in LAYER_PATTERNS.values():
+            for keyword in keywords:
+                if keyword in parts_lower or keyword == stem:
+                    return True
+        node_data = self.graph.nodes.get(path, {})
+        if node_data.get("is_test", False):
+            return True
+        return False
 
     def enrich_with_rlm(self, rlm_results: Dict[str, Any]) -> ArchitectureAnalysis:
         """Merge RLM semantic analysis into the architecture analysis.
@@ -465,14 +674,23 @@ class CodebaseGraphAnalyzer:
 
         # If RLM found hidden dependencies, add them as dashed edges in graph_data
         if analysis.hidden_dependencies:
+            valid_nodes = {n["id"] for n in analysis.graph_data.get("nodes", [])}
             for dep in analysis.hidden_dependencies:
-                analysis.graph_data.setdefault("links", []).append(
-                    {
-                        "source": dep.get("source", ""),
-                        "target": dep.get("target", ""),
-                        "type": "hidden",
-                    }
-                )
+                source = dep.get("source", "")
+                target = dep.get("target", "")
+                if (
+                    source
+                    and target
+                    and source in valid_nodes
+                    and target in valid_nodes
+                ):
+                    analysis.graph_data.setdefault("links", []).append(
+                        {
+                            "source": source,
+                            "target": target,
+                            "type": "hidden",
+                        }
+                    )
 
         return analysis
 
@@ -494,6 +712,7 @@ class CodebaseGraphAnalyzer:
                     "fan_out": self.graph.out_degree(node),
                     "docstring": data.get("docstring", ""),
                     "external_imports": data.get("external_imports", []),
+                    "language": data.get("language", "python"),
                 }
             )
 

@@ -115,6 +115,11 @@ _MARKDOWN_FENCE_RE = re.compile(
     re.DOTALL,
 )
 
+_MARKDOWN_FENCE_RE2 = re.compile(
+    r"```\w*\s*(.*?)```",
+    re.DOTALL,
+)
+
 
 def _strip_markdown_fences(text: str) -> str:
     """Extract JSON from an RLM response, handling markdown fences and extra text.
@@ -123,8 +128,18 @@ def _strip_markdown_fences(text: str) -> str:
     or any other fenced code block. Also handles bare JSON with
     surrounding prose.
     """
-    # Try fenced code block first
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    # Try fenced code block first (with newline after fence marker)
     match = _MARKDOWN_FENCE_RE.search(text)
+    if match:
+        return match.group(1).strip()
+
+    # Try alternate fence pattern (no newline required)
+    match = _MARKDOWN_FENCE_RE2.search(text)
     if match:
         return match.group(1).strip()
 
@@ -136,12 +151,18 @@ def _strip_markdown_fences(text: str) -> str:
     if arr_start != -1 and (obj_start == -1 or arr_start < obj_start):
         end = text.rfind("]")
         if end > arr_start:
-            return text[arr_start : end + 1]
+            candidate = text[arr_start : end + 1]
+            # Validate it's balanced
+            if candidate.count("[") == candidate.count("]"):
+                return candidate
 
     if obj_start != -1:
         end = text.rfind("}")
         if end > obj_start:
-            return text[obj_start : end + 1]
+            candidate = text[obj_start : end + 1]
+            # Validate it's balanced
+            if candidate.count("{") == candidate.count("}"):
+                return candidate
 
     return text.strip()
 
@@ -210,23 +231,93 @@ class ArchitectureRLMAnalyzer:
         if self.verbose:
             print(f"  [RLM] {msg}")
 
+    def _detect_languages(self) -> str:
+        """Detect the primary languages in the scanned codebase.
+
+        Returns a human-readable string like "Go and Python" or "Python".
+        """
+        lang_counts: Dict[str, int] = {}
+        for mod in self.structure.modules.values():
+            lang = getattr(mod, "language", "python")
+            lang_counts[lang] = lang_counts.get(lang, 0) + 1
+
+        if not lang_counts:
+            return "Python"
+
+        # Sort by count, take top languages
+        sorted_langs = sorted(lang_counts.items(), key=lambda x: x[1], reverse=True)
+        top_langs = [lang.capitalize() for lang, _ in sorted_langs[:3]]
+
+        if len(top_langs) == 1:
+            return top_langs[0]
+        elif len(top_langs) == 2:
+            return f"{top_langs[0]} and {top_langs[1]}"
+        else:
+            return f"{', '.join(top_langs[:-1])}, and {top_langs[-1]}"
+
+    # Maximum characters for the module summary sent to the LLM.
+    # ~80K chars ≈ ~20K tokens, leaving room for prompts and responses
+    # within a 128K context window.
+    _MAX_SUMMARY_CHARS = 80_000
+
     def _build_module_summary(self) -> str:
-        """Build a compact text summary of all modules for RLM context."""
-        lines = []
-        for path, mod in self.structure.modules.items():
+        """Build a compact text summary of modules for RLM context.
+
+        For large repos, prioritises hub modules (high connectivity),
+        large files, and a representative sample across packages rather
+        than dumping all modules into the prompt.
+        """
+        modules = self.structure.modules
+        total = len(modules)
+
+        # Build all lines first, then truncate if needed
+        module_lines: list[tuple[int, str]] = []
+        for path, mod in modules.items():
             classes = ", ".join(c["name"] for c in mod.classes) or "none"
-            functions = ", ".join(f["name"] for f in mod.functions) or "none"
+            functions = ", ".join(f["name"] for f in mod.functions[:8]) or "none"
             imports = mod.imports + [fi["module"] for fi in mod.from_imports]
-            imports_str = ", ".join(imports[:10]) or "none"
+            imports_str = ", ".join(imports[:8]) or "none"
             line = (
                 f"- {path} ({mod.lines_of_code} LOC) | "
                 f"pkg={mod.package} | classes=[{classes}] | "
                 f"functions=[{functions}] | imports=[{imports_str}]"
             )
             if mod.docstring:
-                doc_preview = mod.docstring[:80].replace("\n", " ")
+                doc_preview = mod.docstring[:60].replace("\n", " ")
                 line += f' | doc="{doc_preview}"'
+            # Score for prioritisation: LOC + import count favours hubs
+            score = mod.lines_of_code + len(imports) * 20
+            module_lines.append((score, line))
+
+        # If everything fits, return it all
+        all_text = "\n".join(line for _, line in module_lines)
+        if len(all_text) <= self._MAX_SUMMARY_CHARS:
+            return all_text
+
+        # Too large — sort by score descending and take top modules
+        self._log(
+            f"Module summary too large ({total} modules, {len(all_text):,} chars). "
+            f"Sampling most significant modules..."
+        )
+        module_lines.sort(key=lambda x: x[0], reverse=True)
+
+        lines = []
+        char_count = 0
+        included = 0
+        for _, line in module_lines:
+            if char_count + len(line) + 1 > self._MAX_SUMMARY_CHARS:
+                break
             lines.append(line)
+            char_count += len(line) + 1
+            included += 1
+
+        omitted = total - included
+        if omitted > 0:
+            lines.append(
+                f"\n(... {omitted} additional modules omitted for brevity. "
+                f"Total: {total} modules.)"
+            )
+
         return "\n".join(lines)
 
     def classify_modules(self) -> Dict[str, str]:
@@ -242,7 +333,8 @@ class ArchitectureRLMAnalyzer:
 
         module_summary = self._build_module_summary()
 
-        prompt = f"""You are analyzing a Python codebase. Classify each module into exactly one architectural layer.
+        languages = self._detect_languages()
+        prompt = f"""You are analyzing a {languages} codebase. Classify each module into exactly one architectural layer.
 
 Layers:
 - data: Models, schemas, ORM, database, migrations
@@ -264,11 +356,11 @@ Output ONLY the JSON object, no other text."""
 
         self.cost_tracker.record(result, "classify_modules")
 
-        # Parse response
+        raw_response = getattr(result, "response", "") or ""
+
         try:
-            classifications = json.loads(_strip_markdown_fences(result.response))
+            classifications = json.loads(_strip_markdown_fences(raw_response))
             if isinstance(classifications, dict):
-                # Filter out keys not in structure.modules (unknown modules)
                 known = set(self.structure.modules.keys())
                 unknown = set(classifications.keys()) - known
                 if unknown:
@@ -276,8 +368,9 @@ Output ONLY the JSON object, no other text."""
                         f"Warning: Dropping {len(unknown)} unknown module(s) from classification: {sorted(unknown)[:5]}"
                     )
                 return {k: v for k, v in classifications.items() if k in known}
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as e:
+            self._log(f"Could not parse classification response: {e}")
+            self._log(f"Raw response (first 500 chars): {raw_response[:500]}")
 
         self._log(
             "Warning: Could not parse RLM classification response, using heuristic fallback"
@@ -313,20 +406,22 @@ Output ONLY the JSON object, no other text."""
         for path, source in source_modules.items():
             if total + len(source) > max_chars:
                 break
-            context_lines.append(f"### {path}\n```python\n{source}\n```\n")
+            lang = getattr(self.structure.modules.get(path), "language", "python")
+            context_lines.append(f"### {path}\n```{lang}\n{source}\n```\n")
             total += len(source)
 
         context = "\n".join(context_lines)
 
-        prompt = f"""Analyze these Python source files for hidden/dynamic dependencies that AST import analysis would miss.
+        languages = self._detect_languages()
+        prompt = f"""Analyze these {languages} source files for hidden/dynamic dependencies that static import analysis would miss.
 
 Look for:
-1. importlib.import_module() calls
-2. __import__() calls
-3. Plugin/registry patterns that load modules by string name
-4. getattr() on modules
-5. exec/eval that import modules
-6. Dynamic class loading patterns
+1. Dynamic module loading (importlib, __import__, dlopen, reflection)
+2. Plugin/registry patterns that load modules by string name
+3. Runtime dependency injection
+4. Dynamic class/function loading patterns
+5. Build-time code generation references
+6. Interface-based indirection hiding concrete dependencies
 
 Source files:
 {context}
@@ -393,7 +488,8 @@ Graph Metrics:
 - Total edges: {graph_metrics.get("total_edges", "unknown")}
 """
 
-        prompt = f"""Analyze this Python codebase's architecture and identify its architectural pattern(s).
+        languages = self._detect_languages()
+        prompt = f"""Analyze this {languages} codebase's architecture and identify its architectural pattern(s).
 
 Modules:
 {module_summary}
@@ -419,35 +515,38 @@ Output ONLY the JSON."""
 
         self.cost_tracker.record(result, "detect_patterns")
 
+        raw_response = getattr(result, "response", "") or ""
+        extracted = _strip_markdown_fences(raw_response)
+
         try:
-            patterns = json.loads(_strip_markdown_fences(result.response))
+            patterns = json.loads(extracted)
             if isinstance(patterns, dict):
-                # Ensure required keys exist with sensible defaults
                 patterns.setdefault("detected_pattern", "unknown")
                 patterns.setdefault("confidence", 0.0)
                 patterns.setdefault("anti_patterns", [])
                 patterns.setdefault("reasoning", "")
 
-                # Clamp confidence to [0.0, 1.0]
                 try:
                     conf = float(patterns["confidence"])
                     patterns["confidence"] = max(0.0, min(1.0, conf))
                 except (ValueError, TypeError):
                     patterns["confidence"] = 0.0
 
-                # Ensure anti_patterns is a list
                 if not isinstance(patterns["anti_patterns"], list):
                     patterns["anti_patterns"] = [patterns["anti_patterns"]]
 
                 return patterns
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except json.JSONDecodeError as e:
+            self._log(f"JSON decode error in detect_patterns: {e}")
+            self._log(f"Raw response (first 500 chars): {raw_response[:500]}")
+        except TypeError as e:
+            self._log(f"Type error in detect_patterns: {e}")
 
         return {
             "detected_pattern": "unknown",
             "confidence": 0.0,
             "anti_patterns": [],
-            "reasoning": "Could not parse RLM response",
+            "reasoning": f"Could not parse RLM response. Raw output (truncated): {raw_response[:200]}",
         }
 
     def suggest_refactoring(

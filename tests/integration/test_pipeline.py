@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from rlm_codelens.codebase_graph import ArchitectureAnalysis, CodebaseGraphAnalyzer
-from rlm_codelens.repo_scanner import RepositoryScanner
+from rlm_codelens.repo_scanner import RepositoryScanner, RepositoryStructure
 from rlm_codelens.report_generator import generate_analysis_report
 
 
 @pytest.fixture(scope="module")
-def self_scan():
+def self_scan() -> RepositoryStructure:
     """Scan the rlm-codelens source tree itself."""
     repo_root = str(Path(__file__).resolve().parents[2])
     scanner = RepositoryScanner(repo_root)
@@ -22,7 +22,7 @@ def self_scan():
 class TestSelfScanAnalyzeReport:
     """End-to-end: scan -> analyze -> report."""
 
-    def test_self_scan_analyze_report(self, self_scan):
+    def test_self_scan_analyze_report(self, self_scan: RepositoryStructure) -> None:
         analyzer = CodebaseGraphAnalyzer(self_scan)
         analysis = analyzer.analyze()
 
@@ -45,23 +45,35 @@ class TestSelfScanAnalyzeReport:
             generate_analysis_report(json_path, html_path, open_browser=False)
             html = Path(html_path).read_text()
 
-            # Verify all section IDs present
-            expected_sections = [
+            # Verify core section IDs present (always rendered)
+            core_sections = [
                 "executive-summary",
                 "summary",
                 "health",
                 "pattern",
-                "rlm-insights",
                 "fan-metrics",
                 "hubs",
                 "cycles",
                 "antipatterns",
-                "refactoring",
                 "layers",
                 "guidance",
             ]
-            for sid in expected_sections:
+            for sid in core_sections:
                 assert f'id="{sid}"' in html, f"Missing section: {sid}"
+
+            # Deep-analysis sections only present when deep data exists
+            has_deep_tab = "tab-deep" in html
+            deep_sections = ["rlm-insights", "refactoring"]
+            for sid in deep_sections:
+                if has_deep_tab:
+                    assert f'id="{sid}"' in html, f"Missing deep section: {sid}"
+
+            # Verify tabbed layout
+            assert "tab-btn" in html, "Missing tab buttons"
+            assert "tab-overview" in html, "Missing overview tab"
+            assert "tab-architecture" in html, "Missing architecture tab"
+            assert "tab-issues" in html, "Missing issues tab"
+            assert "tab-guidance" in html, "Missing guidance tab"
 
             # Basic HTML structure check
             assert html.startswith("<!DOCTYPE html>")
@@ -76,7 +88,7 @@ class TestSelfScanAnalyzeReport:
 class TestAnalysisJsonRoundtrip:
     """Verify analysis can be saved to JSON and reloaded faithfully."""
 
-    def test_analysis_json_roundtrip(self, self_scan):
+    def test_analysis_json_roundtrip(self, self_scan: RepositoryStructure) -> None:
         analyzer = CodebaseGraphAnalyzer(self_scan)
         analysis = analyzer.analyze()
 
