@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Nijesh Kanjinghat", email = "nijesh@example.com"}
+    {name = "Nijesh Kanjinghat"}
 ]
 keywords = ["rlm", "codebase-analysis", "architecture", "dependency-graph", "static-analysis", "code-intelligence", "ast"]
 classifiers = [
@@ -21,7 +21,7 @@ classifiers = [
 dependencies = [
     "networkx>=3.1.0",
     "python-dotenv>=1.0.0",
-    "rlms @ git+https://github.com/alexzhang13/rlm.git",
+    "rlms>=0.1.1",
 ]
 
 [project.optional-dependencies]
@@ -63,9 +63,6 @@ Documentation = "https://github.com/knijesh/rlm-codelens#readme"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rlm_codelens"]

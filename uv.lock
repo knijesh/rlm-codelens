@@ -1540,7 +1540,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rlm-codelens", extras = ["go", "java", "rust", "javascript", "typescript", "cpp"], marker = "extra == 'languages'" },
     { name = "rlm-codelens", extras = ["languages"], marker = "extra == 'all'" },
-    { name = "rlms", git = "https://github.com/alexzhang13/rlm.git" },
+    { name = "rlms", specifier = ">=0.1.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "tree-sitter", marker = "extra == 'cpp'", specifier = ">=0.23.0" },
     { name = "tree-sitter", marker = "extra == 'go'", specifier = ">=0.23.0" },
@@ -1562,8 +1562,8 @@ provides-extras = ["go", "java", "rust", "javascript", "typescript", "cpp", "lan
 
 [[package]]
 name = "rlms"
-version = "0.1.0"
-source = { git = "https://github.com/alexzhang13/rlm.git#ee149fc7c691f59fbedadfcbb6b3ba27b82bba20" }
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "google-genai" },
@@ -1573,6 +1573,10 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/09/13fd4abcf935fbbfe33c06f14d2c814513ee43d4ff1e40f6aee51f8b2039/rlms-0.1.1.tar.gz", hash = "sha256:926487e3512526f27505a8306bcc2e20648991f99b232d9be6c5b76e8fec8731", size = 86341, upload-time = "2026-02-18T21:08:37.644Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5c/a9/6538aec016b4e056c5553336a1b42134c108a9305db3e4ca8945dc00cebd/rlms-0.1.1-py3-none-any.whl", hash = "sha256:3dff7d40013065ef62d57deb50e2578ba658045829ed340f94de9b59a49d5369", size = 84370, upload-time = "2026-02-18T21:08:35.855Z" },
 ]
 
 [[package]]

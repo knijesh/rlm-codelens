@@ -15,7 +15,7 @@ Example:
 
 __version__ = "0.2.1"
 __author__ = "Nijesh Kanjinghat"
-__email__ = "nijesh@example.com"
+__email__ = ""
 __license__ = "MIT"
 
 from rlm_codelens.codebase_graph import CodebaseGraphAnalyzer

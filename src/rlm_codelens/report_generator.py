@@ -595,7 +595,11 @@ def _build_executive_summary_section(data: Dict[str, Any], health: tuple) -> str
     pattern_analysis = data.get("pattern_analysis")
     refactoring = data.get("refactoring_suggestions")
 
-    if _has_data(pattern_analysis):
+    if _has_data(pattern_analysis) and not (
+        isinstance(pattern_analysis, dict)
+        and pattern_analysis.get("detected_pattern", "").lower() == "unknown"
+        and pattern_analysis.get("confidence", 0) == 0
+    ):
         assert pattern_analysis is not None
         pname = _escape(pattern_analysis.get("detected_pattern", "Unknown"))
         conf = pattern_analysis.get("confidence", 0)
@@ -638,7 +642,12 @@ def _build_pattern_analysis_section(data: Dict[str, Any]) -> str:
     """Build the architectural pattern analysis section from RLM deep data."""
     pattern_analysis = data.get("pattern_analysis")
 
-    if not _has_data(pattern_analysis):
+    # Treat failed RLM parse (unknown/0% confidence) the same as missing data
+    if not _has_data(pattern_analysis) or (
+        isinstance(pattern_analysis, dict)
+        and pattern_analysis.get("detected_pattern", "").lower() == "unknown"
+        and pattern_analysis.get("confidence", 0) == 0
+    ):
         msg = (
             "No architectural pattern detected in this codebase."
             if _deep_was_run(data)

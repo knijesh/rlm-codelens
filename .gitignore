@@ -113,7 +113,6 @@ Thumbs.db
 # Project specific
 outputs/
 *.json
-*.png
 *.log
 checkpoints/
 
@@ -122,12 +121,12 @@ checkpoints/
 !outputs/examples/
 !outputs/examples/**
 
-# Keep sample artifacts (screenshots, HTML, logs)
-!samples/
-samples/*log.txt
+# Media (screenshots for README)
+!media/
+!media/*.png
 
-# But do NOT track extremely large viz HTML
-samples/pytorch_viz.html
+# Samples (generated outputs — not tracked)
+samples/
 
 # Database
 *.db
@@ -166,4 +165,3 @@ IMPLEMENTATION_SUMMARY.md
 REFACTORING_SUMMARY.md
 REQUIREMENTS.md
 claude.md
-samples/pytorch_viz.html

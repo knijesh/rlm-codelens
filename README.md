@@ -144,17 +144,33 @@ RLM-Codelens has been tested on real-world repositories:
 | **vLLM** | Python | 2,504 | 483K | 7,412 | 127 | 89 |
 | **rlm-codelens** | Python | 23 | 6,800 | 17 | 0 | 3 |
 
-## Sample Reports
+## Sample Output
 
-Analysis reports from real-world repositories:
+Screenshots from a Kubernetes (Go, 2,700+ files) analysis with `--deep` RLM insights:
 
-| Repository | Language | Files | Report | Visualization |
-|------------|----------|-------|--------|---------------|
-| **Kubernetes** | Go | 2,700+ | [kubernetes_report.html](samples/kubernetes_report.html) | [kubernetes_viz.html](samples/kubernetes_viz.html) |
-| **Kubernetes Java Client** | Java | 3,017 | [java_report.html](samples/java_report.html) | [java_viz.html](samples/java_viz.html) |
-| **rlm-codelens** | Python | 23 | [self_report.html](samples/self_report.html) | [self_viz.html](samples/self_viz.html) |
+### Report Overview
 
-> **Latest run outputs:** [samples/](samples/)
+![Report Overview](media/Report_overview.png)
+
+### Architecture — Layers, Hubs & Fan Metrics
+
+![Layer Distribution & Hub Modules](media/Layer_Dist_hub_mod.png)
+
+### Anti-Patterns & Cycles
+
+![Anti-Patterns](media/Anti-patterns.png)
+
+### RLM Deep Insights
+
+![RLM Insights](media/RLM_Insights.png)
+
+### RLM Recommendations
+
+![RLM Recommendations](media/RLM_Reco.png)
+
+### Interactive Dependency Graph (D3.js)
+
+![Repository Visualization](media/Repo_Viz.png)
 
 ## Configuration
 
@@ -193,7 +209,7 @@ rlm-codelens/
 ├── tests/
 │   ├── unit/                      # Unit tests
 │   └── integration/               # Integration tests
-├── samples/                       # Latest analysis outputs
+├── media/                         # Screenshots for README
 ├── run_analysis.sh                # Full pipeline script
 ├── demo_analysis.sh               # Self-scan demo
 └── pyproject.toml
