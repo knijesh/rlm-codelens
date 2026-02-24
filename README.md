@@ -12,31 +12,45 @@ Understanding a large codebase is one of the hardest problems in software engine
 
 | Challenge | Why LLMs Fail | How RLM Works |
 |-----------|--------------|---------------|
-| Codebases are too large for a single context window | GPT-4 can see ~100K tokens; Kubernetes has 2,700+ files | Recursively decomposes the codebase into manageable chunks |
+| Codebases are too large for a single context window | GPT-4 can see ~100K tokens; Kubernetes has 12,000+ files | Recursively decomposes the codebase into manageable chunks |
 | Imports form complex dependency graphs | LLMs can't reliably trace transitive dependencies | Builds a real graph with NetworkX, then reasons over it |
 | Architecture has layers and patterns | LLMs hallucinate structure without seeing the full picture | Static analysis first, RLM enriches with semantic understanding |
 | Anti-patterns hide in the connections | A single file looks fine; problems emerge from relationships | Graph algorithms detect cycles, hubs, and layering violations |
 
 ## Multi-Language Support
 
-RLM-Codelens supports scanning and analyzing repositories written in multiple languages:
+RLM-Codelens supports scanning and analyzing repositories written in multiple languages.
+Tree-sitter grammars are **automatically installed** when you use the language extras — no manual setup required:
 
-| Language | Parser | Use Case |
-|----------|--------|----------|
-| **Python** | AST (built-in) | Primary focus, full support |
-| **Go** | tree-sitter | Kubernetes, vLLM, etc. |
-| **Java** | tree-sitter | Enterprise codebases |
-| **JavaScript/TypeScript** | tree-sitter | Web apps, Node.js |
-| **Rust** | tree-sitter | Systems programming |
-| **C/C++** | tree-sitter | Performance-critical code |
+```bash
+# Install with all language support
+uv sync --extra all
+
+# Or pick specific languages
+uv sync --extra go --extra java
+```
+
+| Language | Parser | Install Extra |
+|----------|--------|---------------|
+| **Python** | AST (built-in) | included by default |
+| **Go** | tree-sitter | `--extra go` |
+| **Java** | tree-sitter | `--extra java` |
+| **JavaScript/TypeScript** | tree-sitter | `--extra javascript` / `--extra typescript` |
+| **Rust** | tree-sitter | `--extra rust` |
+| **C/C++** | tree-sitter | `--extra cpp` |
+
+> Python works out of the box. For other languages, just add the extra — tree-sitter grammars are pulled in automatically. Without the grammar, non-Python files are still detected and counted but parsed with basic LOC-only extraction.
 
 ## Quick Start
 
 ```bash
-# Install
+# Install (Python repos — no extra dependencies needed)
 git clone https://github.com/knijesh/rlm-codelens.git
 cd rlm-codelens
 uv sync --extra dev
+
+# For non-Python repos, add language extras (e.g., Go + Java)
+uv sync --extra dev --extra go --extra java
 
 # Scan & Analyze in one step (static analysis - no API keys needed)
 uv run rlmc analyze-architecture --repo /path/to/repo
@@ -139,14 +153,16 @@ RLM-Codelens has been tested on real-world repositories:
 
 | Repository | Language | Files | LOC | Import Edges | Cycles | Anti-Patterns |
 |------------|----------|-------|-----|--------------|--------|---------------|
-| **Kubernetes** | Go | 2,700+ | 2M+ | 15,000+ | 89 | 156 |
-| **Kubernetes Java Client** | Java | 3,017 | 580K | 8,200+ | 34 | 67 |
-| **vLLM** | Python | 2,504 | 483K | 7,412 | 127 | 89 |
-| **rlm-codelens** | Python | 23 | 6,800 | 17 | 0 | 3 |
+| **Kubernetes** | Go | 12,235 | 3.4M | 77,373 | 182 | 1,860 |
+| **gRPC** | C/C++/Python | 7,163 | 1.2M | 35 | 0 | 1 |
+| **Kubernetes Java Client** | Java | 3,017 | 2.1M | 6,447 | 14 | 267 |
+| **vLLM** | Python | 2,594 | 804K | 12,013 | 24 | 341 |
+| **rlm-codelens** | Python | 23 | 6,824 | 17 | 0 | 3 |
 
 ## Sample Output
 
-Screenshots from a Kubernetes (Go, 2,700+ files) analysis with `--deep` RLM insights:
+Screenshots from a Kubernetes (Go, 12,235 files) analysis with `--deep` RLM insights.
+Also tested on **gRPC** (C/C++/Python, 7,163 files) — a true multi-language codebase:
 
 ### Report Overview
 

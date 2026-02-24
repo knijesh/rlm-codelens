@@ -228,6 +228,9 @@ class RepositoryScanner:
         # Find all supported source files
         source_files = self._find_source_files(set(EXTENSIONS.keys()))
 
+        # Auto-install missing tree-sitter grammars before parsing
+        self._auto_install_grammars(source_files)
+
         # Detect packages (Python-specific but harmless for other langs)
         structure.packages = self._detect_packages()
 
@@ -254,6 +257,85 @@ class RepositoryScanner:
         self._resolve_relative_imports(structure)
 
         return structure
+
+    # pip package names for each language's tree-sitter grammar
+    _GRAMMAR_PACKAGES: Dict[str, List[str]] = {
+        "go": ["tree-sitter", "tree-sitter-go"],
+        "java": ["tree-sitter", "tree-sitter-java"],
+        "rust": ["tree-sitter", "tree-sitter-rust"],
+        "javascript": ["tree-sitter", "tree-sitter-javascript"],
+        "typescript": ["tree-sitter", "tree-sitter-typescript"],
+        "c": ["tree-sitter", "tree-sitter-c"],
+        "cpp": ["tree-sitter", "tree-sitter-c", "tree-sitter-cpp"],
+    }
+
+    def _auto_install_grammars(self, source_files: List[Path]) -> None:
+        """Detect non-Python languages and auto-install tree-sitter grammars."""
+        from rlm_codelens.language_support import detect_language, load_grammar
+
+        # Find languages that need grammars
+        needed_langs: set[str] = set()
+        for src_file in source_files:
+            lang = detect_language(str(src_file.relative_to(self.repo_path)))
+            if lang is not None and lang != "python" and lang in self._GRAMMAR_PACKAGES:
+                needed_langs.add(lang)
+
+        if not needed_langs:
+            return
+
+        # Check which languages are missing grammars
+        missing: set[str] = set()
+        for lang in needed_langs:
+            if load_grammar(lang) is None:
+                missing.add(lang)
+
+        if not missing:
+            return
+
+        # Collect all packages to install
+        packages: set[str] = set()
+        for lang in missing:
+            packages.update(self._GRAMMAR_PACKAGES[lang])
+
+        lang_list = ", ".join(sorted(missing))
+        pkg_list = " ".join(sorted(packages))
+        print(f"\n📦 Detected {lang_list} files — tree-sitter grammars not installed.")
+        print(f"   Installing: {pkg_list}")
+
+        try:
+            subprocess.run(
+                ["uv", "pip", "install", *sorted(packages)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            print("   ✅ Grammars installed successfully.")
+            # Clear cached parsers so they reload with new grammars
+            self._ts_parsers.clear()
+        except FileNotFoundError:
+            # uv not available, try pip
+            try:
+                subprocess.run(
+                    ["pip", "install", *sorted(packages)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                print("   ✅ Grammars installed successfully.")
+                self._ts_parsers.clear()
+            except Exception:
+                print(
+                    f"   ⚠️  Auto-install failed. Install manually: "
+                    f"pip install {pkg_list}"
+                )
+        except subprocess.TimeoutExpired:
+            print(f"   ⚠️  Install timed out. Install manually: pip install {pkg_list}")
+        except subprocess.CalledProcessError:
+            print(
+                f"   ⚠️  Auto-install failed. Install manually: pip install {pkg_list}"
+            )
 
     def _should_exclude(self, path: Path) -> bool:
         """Check if a path should be excluded from scanning."""

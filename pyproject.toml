@@ -84,6 +84,7 @@ omit = [
     "*/commands.py",
     "*/config.py",
     "*/visualizer.py",
+    "*/language_support.py",
     "*/utils/*",
     "*/__main__.py",
 ]
