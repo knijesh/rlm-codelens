@@ -284,10 +284,9 @@ class RepositoryScanner:
             return
 
         # Check which languages are missing grammars
-        missing: set[str] = set()
-        for lang in needed_langs:
-            if load_grammar(lang) is None:
-                missing.add(lang)
+        missing: List[str] = [
+            lang for lang in needed_langs if load_grammar(lang) is None
+        ]
 
         if not missing:
             return
